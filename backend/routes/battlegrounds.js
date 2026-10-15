@@ -6,6 +6,7 @@ const QuizAttempt = require('../models/QuizAttempt');
 const SavedPracticeSet = require('../models/SavedPracticeSet');
 const PointLedger = require('../models/PointLedger');
 const User = require('../models/User');
+const { projectAttempt } = require('../services/learningProjection');
 const { createRateLimiter } = require('../middleware/rateLimit');
 
 const router = express.Router();
@@ -191,7 +192,15 @@ router.post('/quiz-attempts/:attemptId/submit', requireAuth, submitLimiter, asyn
   try {
     const attempt = await QuizAttempt.findOne({ _id: attemptId, userId: req.user._id });
     if (!attempt) return res.status(404).json({ error: 'Quiz attempt not found.' });
-    if (attempt.submittedAt) return res.json({ score: attempt.score, answers: attempt.answers, alreadySubmitted: true });
+    if (attempt.submittedAt) {
+      try {
+        // Re-projecting is safe because answer events use unique user/attempt/question keys.
+        await projectAttempt(attempt);
+      } catch (projectionError) {
+        console.error('Learning projection failed:', projectionError?.name || 'UnknownError');
+      }
+      return res.json({ score: attempt.score, answers: attempt.answers, alreadySubmitted: true });
+    }
     if (answers.length !== attempt.questions.length) {
       return res.status(400).json({ error: 'Submit one answer for each question.' });
     }
@@ -227,6 +236,14 @@ router.post('/quiz-attempts/:attemptId/submit', requireAuth, submitLimiter, asyn
         score: existing.score, answers: existing.answers, alreadySubmitted: true
       });
       return res.status(409).json({ error: 'This quiz attempt has already been submitted.' });
+    }
+
+    // Update mastery and the mistake notebook from server-checked answers. Projection
+    // writes are idempotent; retries can repair a partial projection without double-counting.
+    try {
+      await projectAttempt(saved);
+    } catch (projectionError) {
+      console.error('Learning projection failed:', projectionError?.name || 'UnknownError');
     }
 
     // Points are awarded only for backend-generated quizzes, never for user-uploaded
