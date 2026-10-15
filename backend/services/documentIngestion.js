@@ -105,8 +105,8 @@ async function processDocument(documentId, { lockAlreadyHeld = false } = {}) {
       await DocumentChunk.insertMany(docs.slice(offset, offset + 50), { ordered: true });
     }
 
-    await Document.updateOne(
-      { _id: document._id, userId: document.userId },
+    const transition = await Document.updateOne(
+      { _id: document._id, userId: document.userId, status: 'processing' },
       {
         $set: {
           status: 'ready',
@@ -119,8 +119,15 @@ async function processDocument(documentId, { lockAlreadyHeld = false } = {}) {
         $unset: { sourcePages: 1 }
       }
     );
+
+    // If the owner deleted the document while embeddings were being generated,
+    // do not leave orphaned searchable chunks behind.
+    if (transition.matchedCount !== 1) {
+      await DocumentChunk.deleteMany({ userId: document.userId, documentId: document._id });
+    }
   } catch (error) {
     console.error('Document ingestion failed:', error?.name || 'UnknownError');
+    await DocumentChunk.deleteMany({ documentId, userId: (await Document.findById(documentId).select('userId').lean())?.userId }).catch(() => {});
     await Document.updateOne(
       { _id: documentId },
       {
