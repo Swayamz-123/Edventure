@@ -9,6 +9,8 @@ const { validateQuiz } = require('../routes/pdfQuiz');
 const { splitPages } = require('../services/documentIngestion');
 const { cosineSimilarity, lexicalScore, tokens } = require('../routes/tutor');
 const { parseResp } = require('../infrastructure/redis');
+const { intervalForAccuracy } = require('../services/learningProjection');
+const { reviewInterval } = require('../routes/learning');
 
 test('public user serializer omits credentials and private provider fields', () => {
   const user = toPublicUser({
@@ -127,4 +129,14 @@ test('Redis RESP parser handles scalar, bulk-string, and array responses', () =>
   const array = Buffer.from('*2\r\n:2\r\n$3\r\nbar\r\n');
   assert.deepEqual(parseResp(array, 0), { value: [2, 'bar'], next: array.length });
   assert.equal(parseResp(Buffer.from('$5\r\nxx'), 0), null);
+});
+
+test('mastery and review scheduling intervals are monotonic and bounded', () => {
+  assert.equal(intervalForAccuracy(0.2), 1);
+  assert.equal(intervalForAccuracy(0.6), 3);
+  assert.equal(intervalForAccuracy(0.8), 7);
+  assert.equal(intervalForAccuracy(0.95), 14);
+  assert.equal(reviewInterval(0), 1);
+  assert.equal(reviewInterval(2), 3);
+  assert.equal(reviewInterval(4), 7);
 });
