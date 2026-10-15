@@ -9,7 +9,7 @@ This fork's current development branch is `feature/edventure-2-security-foundati
 - **Authentication and API hardening:** public-user DTOs, registration/login validation, rate limits, session cookies, origin restrictions, request-size limits, security headers and health endpoints.
 - **Server-owned gamification:** course prices are enforced by the backend; the client-controlled point mutation route is retired; point-ledger events deduplicate score awards.
 - **Verified quizzes:** owner-scoped attempts; answer keys are omitted from quiz start responses; the server calculates correctness and scores submitted option indexes.
-- **Multiplayer quiz battles:** joins derive identity from the authenticated Passport session; answers must be sequential, timed on the server, and unique; answer keys are hidden until the game ends.
+- **Multiplayer quiz battles:** joins derive identity from the authenticated Passport session; answers must be sequential, timed on the server, and unique; answer keys are hidden until the game ends. Accepted answers and match summaries are persisted, and users can view their own match history.
 - **ERA document tutor (RAG baseline):** upload a text-based PDF, retain page-aware chunks/embeddings, retrieve semantically and lexically relevant passages, and answer with source labels and page links. Document access is owner-scoped.
 - **Adaptive learning:** a topic mastery estimate, private mistake notebook, review scheduling, and a dashboard based on server-verified generated-quiz answers.
 - **Shared infrastructure:** Redis-backed fixed-window rate limits and sessions (when configured), an idempotent Redis-list document queue, retry/recovery behavior, a standalone worker command, Docker Compose, and GitHub Actions CI.
@@ -19,7 +19,7 @@ This fork's current development branch is `feature/edventure-2-security-foundati
 - PDF text is extracted in the browser via PDF.js and posted to the backend; scanned/image-only PDFs, OCR, and server-side file scanning are not included yet.
 - Retrieval uses a bounded MongoDB chunk scan with cosine similarity plus keyword overlap. It is not Atlas Vector Search yet, and no Recall@5/citation-quality results are claimed until the evaluation harness is run against a labelled dataset.
 - The queue is a small Redis-list worker, not BullMQ. Deploying a separate worker requires `RUN_DOCUMENT_WORKER=false` on the API and running `npm run worker` in a worker process.
-- Multiplayer game state is still held in process memory. The server scoring safeguards are implemented, but shared Redis matchmaking, durable match records, socket adapter, and reconnect/resume are follow-up work.
+- Live matchmaking/game state is still held in process memory. Completed/active match summaries and accepted answers are persisted, but shared Redis matchmaking, Socket.IO scaling, restart recovery of active matches, and reconnect/resume are follow-up work.
 - Topic mastery uses a simple confidence-adjusted accuracy estimate and accuracy-derived review intervals; it is not a clinical or research-validated learning measure.
 - Real-provider integration and production load tests require your own credentials and infrastructure.
 
@@ -101,7 +101,11 @@ When operating the worker separately, set `RUN_DOCUMENT_WORKER=false` on the API
 
 ## Verification
 
-The GitHub Actions workflow runs backend JavaScript syntax checks, unit tests, and the frontend production build. Docker Compose configuration validation is included as a separate CI job. Passing these checks does **not** replace a real-provider integration test, RAG quality evaluation, security review, or concurrent load test.
+For labelled RAG retrieval evaluation, prepare a dedicated learner account with the benchmark documents, label relevant chunk IDs in `backend/evaluation/rag-cases.example.json`, then set `RAG_EVAL_USER_ID` and `RAG_EVAL_DATASET` before running `npm run evaluate:rag` from `backend`. The script reports Recall@5, MRR, nDCG@5, threshold-based abstention accuracy and retrieval latency percentiles; it does not invent faithfulness scores. Citation precision is only computed when cited/acceptable chunk IDs are explicitly annotated. Output defaults to `backend/evaluation/rag-results.json`.
+
+The protected Prometheus endpoint is disabled by default. Set `METRICS_ENABLED=true` and a strong `METRICS_TOKEN` on the backend; call `/metrics` with `Authorization: Bearer <token>`. Metrics are process-local HTTP counters/histograms, not a distributed metrics backend.
+
+The GitHub Actions workflow runs backend JavaScript syntax checks, unit tests, the frontend production build, and Docker Compose configuration validation. No hosted Redis or real AI provider integration is implied by those checks. Passing these checks does **not** replace a real-provider integration test, RAG quality evaluation, security review, or concurrent load test.
 
 ## Main API additions
 
@@ -109,6 +113,7 @@ The GitHub Actions workflow runs backend JavaScript syntax checks, unit tests, a
 - `GET/POST/DELETE /api/documents` — list, index extracted PDF text, and delete the current user's documents.
 - `POST /api/tutor/ask` — retrieve evidence from selected owned documents and return a cited answer.
 - `POST /api/quiz-attempts/:attemptId/submit` — submit selected answer indexes; server calculates score.
+- `GET /api/matches/history` — safe summary of the signed-in user's saved matches.
 - `GET /api/learning/overview` — topic mastery and revision overview.
 - `GET /api/learning/mistakes` — current user's mistake notebook.
 - `POST /api/learning/mistakes/:mistakeId/review` — schedule a review.
