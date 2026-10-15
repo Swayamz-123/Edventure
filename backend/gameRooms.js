@@ -195,6 +195,7 @@ module.exports = function registerGameHandlers(io, generateQuestions, User) {
           classLevel,
           mode,
           status: 'active',
+          questionCount: gameQuestions.length,
           players: players.map(player => ({
             userId: player.userData.userId,
             username: player.userData.username,
