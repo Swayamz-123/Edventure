@@ -6,6 +6,9 @@ const { createRateLimiter } = require('../middleware/rateLimit');
 const { normalizeHistory } = require('../routes/chatbot');
 const { validateQuestion, toPublicQuestion } = require('../routes/battlegrounds');
 const { validateQuiz } = require('../routes/pdfQuiz');
+const { splitPages } = require('../services/documentIngestion');
+const { cosineSimilarity, lexicalScore, tokens } = require('../routes/tutor');
+const { parseResp } = require('../infrastructure/redis');
 
 test('public user serializer omits credentials and private provider fields', () => {
   const user = toPublicUser({
@@ -91,4 +94,37 @@ test('generated PDF quiz schema requires exactly ten valid questions', () => {
       ? { ...question, correctAnswer: 'not-an-option' }
       : question)
   }));
+});
+
+
+test('document chunking preserves page references and overlaps long sections', () => {
+  const pages = splitPages([
+    { pageNumber: 1, text: 'A'.repeat(1500) },
+    { pageNumber: 2, text: 'Operating systems manage processes and memory.' }
+  ]);
+  assert.ok(pages.length >= 3);
+  assert.equal(pages[0].pageNumber, 1);
+  assert.equal(pages.at(-1).pageNumber, 2);
+  assert.ok(pages.every(chunk => chunk.text.length <= 1200));
+});
+
+test('hybrid retrieval helpers rank semantic and lexical matches', () => {
+  assert.equal(cosineSimilarity([1, 0], [1, 0]), 1);
+  assert.equal(cosineSimilarity([1, 0], [0, 1]), 0);
+  assert.equal(cosineSimilarity([1], [1, 0]), -1);
+  const queryTokens = tokens('Explain Redis rate limiting to me');
+  assert.ok(lexicalScore(queryTokens, 'Redis rate limiting uses counters') > 0.4);
+  assert.equal(lexicalScore(queryTokens, 'Photosynthesis in leaves'), 0);
+});
+
+test('Redis RESP parser handles scalar, bulk-string, and array responses', () => {
+  const scalar = Buffer.from('+OK\\r\\n');
+  assert.deepEqual(parseResp(scalar, 0), { value: 'OK', next: scalar.length });
+
+  const bulk = Buffer.from('$3\\r\\nfoo\\r\\n');
+  assert.deepEqual(parseResp(bulk, 0), { value: 'foo', next: bulk.length });
+
+  const array = Buffer.from('*2\\r\\n:2\\r\\n$3\\r\\nbar\\r\\n');
+  assert.deepEqual(parseResp(array, 0), { value: [2, 'bar'], next: array.length });
+  assert.equal(parseResp(Buffer.from('$5\\r\\nxx'), 0), null);
 });
