@@ -6,6 +6,7 @@ const documentChunkSchema = new mongoose.Schema({
   chunkIndex: { type: Number, required: true, min: 0 },
   pageNumber: { type: Number, required: true, min: 1 },
   text: { type: String, required: true, maxlength: 2400 },
+  embeddingModel: { type: String, required: true, default: 'gemini-embedding-001' },
   embedding: { type: [Number], required: true, select: false },
   createdAt: { type: Date, default: Date.now }
 }, { versionKey: false });
