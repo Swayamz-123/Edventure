@@ -11,6 +11,7 @@ const { cosineSimilarity, lexicalScore, tokens } = require('../routes/tutor');
 const { parseResp } = require('../infrastructure/redis');
 const { intervalForAccuracy } = require('../services/learningProjection');
 const { reviewInterval } = require('../routes/learning');
+const { reciprocalRank, recallAtK, ndcgAtK, shouldAbstain, percentile } = require('../scripts/evaluateRag');
 
 test('public user serializer omits credentials and private provider fields', () => {
   const user = toPublicUser({
@@ -139,4 +140,15 @@ test('mastery and review scheduling intervals are monotonic and bounded', () => 
   assert.equal(reviewInterval(0), 1);
   assert.equal(reviewInterval(2), 3);
   assert.equal(reviewInterval(4), 7);
+});
+
+test('RAG evaluation metrics score relevant evidence and retrieval abstention', () => {
+  const ranked = ['chunk-b', 'chunk-a', 'chunk-c'];
+  const relevant = ['chunk-a', 'chunk-c'];
+  assert.equal(reciprocalRank(ranked, relevant), 0.5);
+  assert.equal(recallAtK(ranked, relevant, 2), 0.5);
+  assert.ok(ndcgAtK(ranked, relevant, 3) > 0 && ndcgAtK(ranked, relevant, 3) <= 1);
+  assert.equal(shouldAbstain({ semantic: 0.1, lexical: 0.05 }), true);
+  assert.equal(shouldAbstain({ semantic: 0.7, lexical: 0.3 }), false);
+  assert.equal(percentile([8, 2, 5, 3], 0.5), 3);
 });
