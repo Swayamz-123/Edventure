@@ -49,3 +49,15 @@ jobs:
       - name: Build production frontend
         run: npm run build
         working-directory: frontend
+
+  docker-compose-config:
+    name: Validate Docker Compose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare non-secret local configuration
+        run: |
+          cp .env.docker.example .env
+          cp backend/.env.example backend/.env
+      - name: Validate Compose syntax and interpolation
+        run: docker compose config -q
