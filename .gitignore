@@ -36,7 +36,15 @@ frontend/.eslintcache
 Thumbs.db
 
 # Misc
+/.env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+# Locally generated retrieval evaluation output
+backend/evaluation/rag-results.json
+
+# Keep private benchmark datasets out of the repository
+backend/evaluation/private/
+backend/evaluation/rag-results-*.json
+backend/evaluation/rag-cases-local.json

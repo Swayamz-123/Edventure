@@ -888,6 +888,7 @@ function BattlegroundsGame() {
   const [selectedAnswer, setSelectedAnswer] = useState(null);
   const [score, setScore] = useState(0);
   const [gameId, setGameId] = useState(searchParams.get('gameId') || null);
+  const [quizAttemptId, setQuizAttemptId] = useState(null);
   const [timeLeft, setTimeLeft] = useState(30);
   const timerRef = useRef(null);
   const [gameState, setGameState] = useState('loading'); // loading, vs-screen, playing, waiting-opponent, finished
@@ -942,10 +943,17 @@ function BattlegroundsGame() {
             await loadPracticeQuestions();
           } else {
             // Regular single player - generate new questions
-            const questionsRes = await axios.get(`${import.meta.env.VITE_BACKEND_URL}/api/battlegrounds-questions/filter?subject=${subject}&difficulty=${difficulty}&class=${classLevel}`);
+            const questionsRes = await axios.get(
+              `${import.meta.env.VITE_BACKEND_URL}/api/battlegrounds-questions/filter?subject=${encodeURIComponent(subject)}&difficulty=${encodeURIComponent(difficulty)}&class=${encodeURIComponent(classLevel)}`,
+              { withCredentials: true }
+            );
             const questionsData = questionsRes.data;
-            const gameQuestions = questionsData.questions.slice(0, 10);
-            setQuestions(gameQuestions);
+            setQuizAttemptId(questionsData.quizId);
+            setQuestions((questionsData.questions || []).slice(0, 10));
+            setCurrentQuestionIndex(0);
+            setAnswers([]);
+            setScore(0);
+            setTimeLeft(30);
             setGameState('playing');
           }
         }
@@ -1092,18 +1100,24 @@ function BattlegroundsGame() {
         console.error('❌ Error updating local answers from final results:', e);
       }
 
-      try {
-        if (user) {
-          const playerScore = normalized.player1.username === user.username ? Number(normalized.player1.score ?? normalized.player1.points ?? 0) : Number(normalized.player2.score ?? normalized.player2.points ?? 0);
-          if (!isNaN(playerScore)) {
-            await axios.post(`${import.meta.env.VITE_BACKEND_URL}/auth/update_points`, {
-              points: playerScore
-            }, { withCredentials: true });
-            console.log('💰 Updated user points after multiplayer game:', playerScore);
-          }
+      // The server persists verified match points from its authoritative scoring.
+      if (Array.isArray(data.questions) && data.questions.length > 0) {
+        setQuestions(data.questions);
+        try {
+          await axios.post(
+            `${import.meta.env.VITE_BACKEND_URL}/api/battlegrounds-questions/save-practice`,
+            {
+              gameId: data.gameId,
+              subject: data.subject,
+              difficulty: data.difficulty,
+              classLevel: data.classLevel,
+              questions: data.questions
+            },
+            { withCredentials: true }
+          );
+        } catch (saveError) {
+          console.warn('Could not save multiplayer revision set:', saveError?.response?.status || 'request failed');
         }
-      } catch (err) {
-        console.error('❌ Error updating points after multiplayer game:', err);
       }
     });
 
@@ -1182,13 +1196,21 @@ function BattlegroundsGame() {
   const loadPracticeQuestions = async () => {
     console.log('📚 Loading practice questions with params:', { subject, difficulty, classLevel });
     try {
-      const response = await axios.get(`${import.meta.env.VITE_BACKEND_URL}/api/battlegrounds-questions/practice?subject=${subject}&difficulty=${difficulty}&class=${classLevel}`);
+      const response = await axios.get(
+        `${import.meta.env.VITE_BACKEND_URL}/api/battlegrounds-questions/practice?subject=${encodeURIComponent(subject)}&difficulty=${encodeURIComponent(difficulty)}&class=${encodeURIComponent(classLevel)}`,
+        { withCredentials: true }
+      );
       const practiceData = response.data;
 
       if (practiceData.questions && practiceData.questions.length > 0) {
-        const shuffledQuestions = practiceData.questions.sort(() => Math.random() - 0.5);
-        const gameQuestions = shuffledQuestions.slice(0, 10);
+        // Keep server ordering because the attempt answer key is indexed in this order.
+        const gameQuestions = practiceData.questions.slice(0, 10);
+        setQuizAttemptId(practiceData.quizId);
         setQuestions(gameQuestions);
+        setCurrentQuestionIndex(0);
+        setAnswers([]);
+        setScore(0);
+        setTimeLeft(30);
         setGameState('playing');
         console.log('✅ Practice questions loaded:', gameQuestions.length);
       } else {
@@ -1245,18 +1267,10 @@ function BattlegroundsGame() {
     newAnswers[currentQuestionIndex] = {
       questionId: currentQuestion.id,
       selectedAnswer: usedAnswer !== null ? usedAnswer : -1,
-      isCorrect: !isMultiplayer ? (usedAnswer !== null && usedAnswer !== -1 ? usedAnswer === currentQuestion.correctAnswer : false) : null,
+      isCorrect: null,
       timeTaken: timeUsed
     };
     setAnswers(newAnswers);
-
-    if (!isMultiplayer) {
-      const isCorrect = usedAnswer !== null && usedAnswer !== -1 ? usedAnswer === currentQuestion.correctAnswer : false;
-      if (isCorrect) {
-        const points = currentQuestion.points + Math.floor((timeLeftAtSubmit ?? timeLeft) / 3);
-        setScore(prevScore => prevScore + points);
-      }
-    }
 
     if (isMultiplayer && socket) {
       socket.emit('submit-answer', {
@@ -1280,91 +1294,76 @@ function BattlegroundsGame() {
         setSelectedAnswer(null);
         setTimeLeft(30);
       } else {
-        finishGame();
+        finishGame(newAnswers);
       }
     }
   };
 
-  const finishGame = async () => {
-    console.log('🎮 Game completion initiated');
-
-    const computeFinalScore = () => {
-      try {
-        if (!questions || questions.length === 0) return 0;
-        let total = 0;
-        for (let i = 0; i < answers.length; i++) {
-          const ans = answers[i];
-          const q = questions[i];
-          if (!ans || !q) continue;
-          const selected = ans.selectedAnswer;
-          if (selected !== -1 && selected === q.correctAnswer) {
-            const timeTaken = typeof ans.timeTaken === 'number' ? ans.timeTaken : 0;
-            const timeLeftForPoint = Math.max(0, (q.timeLimit || 30) - timeTaken);
-            const bonus = Math.floor(timeLeftForPoint / 3);
-            total += (q.points || 0) + bonus;
-          }
-        }
-        return total;
-      } catch (e) {
-        console.error('❌ Error computing final score:', e);
-        return score || 0;
-      }
-    };
-
-    if (isMultiplayer && socket) {
-      if (gameId && questions.length > 0 && mode !== 'practice') {
-        try {
-          await axios.post(`${import.meta.env.VITE_BACKEND_URL}/api/battlegrounds-questions/save-practice`, {
-            gameId,
-            subject,
-            difficulty,
-            classLevel,
-            questions
-          });
-          console.log('💾 Saved questions for practice mode');
-        } catch (err) {
-          console.error('❌ Error saving questions:', err);
-        }
-      }
-    } else {
-      setGameState('finished');
-
-      const finalPoints = computeFinalScore();
-
-      if (questions.length > 0 && mode !== 'practice') {
-        try {
-          await axios.post(`${import.meta.env.VITE_BACKEND_URL}/api/battlegrounds-questions/save-practice`, {
-            gameId: `single_${Date.now()}`,
-            subject,
-            difficulty,
-            classLevel,
-            questions
-          });
-          console.log('💾 Saved single-player questions for practice mode');
-        } catch (err) {
-          console.log('❌ Error saving single-player questions for practice:', err);
-        }
-      }
-
-      try {
-        await axios.post(`${import.meta.env.VITE_BACKEND_URL}/auth/update_points`, {
-          points: finalPoints,
-          badge: finalPoints > 200 ? 'Battle Champion' : null
-        }, { withCredentials: true });
-        console.log('💰 Updated user points (single-player):', finalPoints);
-      } catch (err) {
-        console.error('❌ Error updating points after single-player game:', err);
-      }
-    }
+  const finishGame = async (answerSnapshot = answers) => {
+    setGameState('finished');
 
     try {
-      await axios.post('http://localhost:5000/auth/update_points', {
-        points: score,
-        badge: score > 200 ? 'Battle Champion' : null
-      }, { withCredentials: true });
-      console.log('💰 Updated user points');
-    } catch (err) {
-      console.error('❌ Error updating points:', err);
+      if (!quizAttemptId) {
+        throw new Error('Quiz attempt is missing. Please start a new quiz.');
+      }
+
+      // Only option indexes cross the trust boundary. The server owns the answer
+      // key, correctness calculation, point award, and duplicate protection.
+      const submittedAnswers = questions.map((_, index) => {
+        const answer = answerSnapshot[index];
+        return Number.isInteger(answer?.selectedAnswer) ? answer.selectedAnswer : -1;
+      });
+      const response = await axios.post(
+        `${import.meta.env.VITE_BACKEND_URL}/api/quiz-attempts/${quizAttemptId}/submit`,
+        { answers: submittedAnswers },
+        { withCredentials: true }
+      );
+
+      const result = response.data;
+      setScore(Number(result.score) || 0);
+      setAnswers((result.answers || []).map((answer, index) => ({
+        questionId: questions[index]?.id ?? `question-${index + 1}`,
+        selectedAnswer: answer.answerIndex,
+        isCorrect: Boolean(answer.isCorrect),
+        timeTaken: 0
+      })));
+      const reviewedQuestions = questions.map((question, index) => ({
+        ...question,
+        correctAnswer: result.answers?.[index]?.correctAnswer
+      }));
+      setQuestions(reviewedQuestions);
+
+      // Save generated solo quizzes as this user's private revision set.
+      if (mode !== 'practice' && reviewedQuestions.length > 0) {
+        try {
+          await axios.post(
+            `${import.meta.env.VITE_BACKEND_URL}/api/battlegrounds-questions/save-practice`,
+            {
+              gameId: `solo-${quizAttemptId}`,
+              subject,
+              difficulty,
+              classLevel,
+              questions: reviewedQuestions
+            },
+            { withCredentials: true }
+          );
+        } catch (saveError) {
+          console.warn('Could not save revision set:', saveError?.response?.status || 'request failed');
+        }
+      }
+
+      try {
+        const userResponse = await axios.get(
+          `${import.meta.env.VITE_BACKEND_URL}/auth/current_user`,
+          { withCredentials: true }
+        );
+        setUser(userResponse.data);
+      } catch (_error) {
+        // Quiz result remains available if refreshing the profile fails.
+      }
+    } catch (error) {
+      console.error('Verified quiz submission failed:', error?.response?.status || error?.message);
+      alert(error.response?.data?.error || error.message || 'Quiz submission failed. Please try again.');
     }
   };
 

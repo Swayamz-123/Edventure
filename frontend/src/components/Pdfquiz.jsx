@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import Sidebar from './SideBar';
 
 // --- Helper Components ---
@@ -98,74 +97,21 @@ const Pdfquiz = () => {
     setTimeLeft(30);
   };
 
+  // Text extraction remains in the browser, but model credentials and inference
+  // now stay on the backend instead of being bundled into the public Vite build.
   const callGeminiAPI = async (text) => {
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-
-    if (!apiKey) {
-      throw new Error("API key is missing. Please check your .env file.");
-    }
-
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash",
-      generationConfig: {
-        responseMimeType: "application/json",
-      }
+    const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/pdf-quiz`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
     });
 
-    const systemPrompt = `You are an expert quiz creator. Your task is to create a multiple-choice quiz based solely on the provided text.
-
-    - Generate exactly 10 questions.
-    - Each question must have 4 options, with one correct answer.
-    - Questions must be derived strictly from the content and core concepts explicitly mentioned in the provided text.
-    - Do not generate questions about metadata (e.g., document title, assignment name) or topics not explicitly covered in the text.
-    - Avoid extrapolating or introducing external topics not present in the text.
-    - Ensure questions are clear, relevant, and focused on key information or concepts directly stated in the text.
-    - Return the response as a JSON object with the following structure:
-
-    {
-      "questions": [
-        {
-          "question": "Question text here",
-          "options": ["Option 1", "Option 2", "Option 3", "Option 4"],
-          "correctAnswer": "The correct option text"
-        }
-      ]
-    }`;
-
-    const prompt = `${systemPrompt}\n\nCreate a quiz from this text: ${text}`;
-
-    let attempt = 0;
-    const maxAttempts = 5;
-
-    while (attempt < maxAttempts) {
-      try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        const jsonText = response.text();
-
-        if (!jsonText) {
-          throw new Error("Received an empty response from the AI.");
-        }
-
-        const cleanedJson = jsonText.replace(/```json\n?|\n?```/g, '').trim();
-        const quizData = JSON.parse(cleanedJson);
-
-        if (!quizData.questions || !Array.isArray(quizData.questions) || quizData.questions.length === 0) {
-          throw new Error("Invalid quiz structure received.");
-        }
-
-        return quizData;
-      } catch (error) {
-        console.error(`Attempt ${attempt + 1} failed:`, error);
-        attempt++;
-        if (attempt >= maxAttempts) {
-          throw new Error(`Failed to generate quiz after ${maxAttempts} attempts: ${error.message}`);
-        }
-        const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || 'Failed to generate quiz.');
     }
+    return data;
   };
 
   const handleSubmit = async () => {

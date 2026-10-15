@@ -69,7 +69,8 @@ const Chatbot = () => {
   };
 
   const sendMessage = async (message) => {
-    const newMessages = [...messages, { role: 'user', parts: [{ text: message }] }];
+    // Bound browser history to the same limit enforced by the API.
+    const newMessages = [...messages, { role: 'user', parts: [{ text: message }] }].slice(-20);
     setMessages(newMessages);
     setInput('');
     setIsTyping(true);
@@ -78,7 +79,7 @@ const Chatbot = () => {
       const response = await axios.post(`${import.meta.env.VITE_BACKEND_URL}/api/chatbot`, {
         history: newMessages,
         user_name: userName
-      });
+      }, { withCredentials: true });
       const aiReply = response.data.reply;
       setMessages([...newMessages, { role: 'model', parts: [{ text: aiReply }] }]);
     } catch (error) {
