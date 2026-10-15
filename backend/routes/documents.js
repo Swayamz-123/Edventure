@@ -3,6 +3,8 @@ const mongoose = require('mongoose');
 const Document = require('../models/Document');
 const DocumentChunk = require('../models/DocumentChunk');
 const { processDocument } = require('../services/documentIngestion');
+const redis = require('../infrastructure/redis');
+const { enqueueDocument } = require('../infrastructure/jobQueue');
 const { createRateLimiter } = require('../middleware/rateLimit');
 
 const router = express.Router();
@@ -81,11 +83,22 @@ router.post('/', requireAuth, ingestionLimiter, async (req, res) => {
 
     // The job state is persisted in MongoDB before work begins. Server startup
     // resumes any document left in "processing" if this process restarts.
-    setImmediate(() => {
-      processDocument(document._id).catch(error => {
-        console.error('Document ingestion scheduling failed:', error?.name || 'UnknownError');
+    if (redis.isConfigured()) {
+      try {
+        await enqueueDocument(document._id);
+      } catch (queueError) {
+        // Preserve availability if Redis briefly fails after request validation.
+        // The document state is durable and startup recovery can retry it.
+        console.error('Redis queue unavailable for document:', queueError?.name || 'UnknownError');
+        setImmediate(() => processDocument(document._id));
+      }
+    } else {
+      setImmediate(() => {
+        processDocument(document._id).catch(error => {
+          console.error('Document ingestion scheduling failed:', error?.name || 'UnknownError');
+        });
       });
-    });
+    }
 
     return res.status(202).json({ document: publicDocument(document) });
   } catch (_error) {
