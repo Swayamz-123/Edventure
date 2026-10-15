@@ -288,6 +288,14 @@ module.exports = function registerGameHandlers(io, generateQuestions, User) {
       game.status = 'completed';
 
       const finalScores = {
+        gameId: game.id,
+        subject: game.subject,
+        difficulty: game.difficulty,
+        classLevel: game.classLevel,
+        questions: game.questions.map((question, index) => ({
+          ...publicQuestion(question, index),
+          correctAnswer: normalizeCorrectAnswer(question)
+        })),
         player1: playerResult(game, game.players[0]),
         player2: playerResult(game, game.players[1]),
         winner: game.scores[game.players[0].socketId] > game.scores[game.players[1].socketId]
