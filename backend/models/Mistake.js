@@ -10,7 +10,7 @@ const mistakeSchema = new mongoose.Schema({
   options: { type: [String], required: true },
   selectedAnswer: { type: Number, required: true, min: -1, max: 3 },
   correctAnswer: { type: Number, required: true, min: 0, max: 3 },
-  status: { type: String, enum: ['open', 'reviewed'], default: 'open' },
+  status: { type: String, enum: ['open', 'resolved'], default: 'open' },
   reviewCount: { type: Number, default: 0, min: 0 },
   nextReviewAt: { type: Date, default: Date.now },
   createdAt: { type: Date, default: Date.now },
