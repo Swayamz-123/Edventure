@@ -1,6 +1,7 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const Document = require('../models/Document');
 const DocumentChunk = require('../models/DocumentChunk');
+const redis = require('../infrastructure/redis');
 
 const MAX_CHUNK_CHARS = 1_200;
 const CHUNK_OVERLAP_CHARS = 180;
@@ -59,12 +60,20 @@ async function embedChunks(chunks) {
   return result;
 }
 
-async function processDocument(documentId) {
+async function processDocument(documentId, { lockAlreadyHeld = false } = {}) {
   const key = String(documentId);
   if (activeJobs.has(key)) return;
   activeJobs.add(key);
+  const lockKey = `edventure:lock:document:${key}`;
+  const lockToken = `inline:${process.pid}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+  let acquiredLock = false;
 
   try {
+    if (redis.isConfigured() && !lockAlreadyHeld) {
+      const result = await redis.command(['SET', lockKey, lockToken, 'NX', 'EX', 300]);
+      if (result !== 'OK') return;
+      acquiredLock = true;
+    }
     const document = await Document.findOne({
       _id: documentId,
       status: 'processing'
@@ -123,6 +132,17 @@ async function processDocument(documentId) {
       }
     );
   } finally {
+    if (acquiredLock) {
+      try {
+        await redis.command([
+          'EVAL',
+          "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0",
+          1, lockKey, lockToken
+        ]);
+      } catch (error) {
+        console.error('Inline document lock cleanup failed:', error?.name || 'UnknownError');
+      }
+    }
     activeJobs.delete(key);
   }
 }
