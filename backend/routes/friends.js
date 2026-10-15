@@ -107,3 +107,5 @@ router.delete('/remove/:friendId', requireAuth, mutationLimiter, async (req, res
 });
 
 module.exports = router;
+
+module.exports.escapeRegex = escapeRegex;
