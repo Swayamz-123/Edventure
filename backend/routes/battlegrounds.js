@@ -156,8 +156,8 @@ router.get('/battlegrounds-questions/filter', requireAuth, questionLimiter, asyn
   const subject = cleanText(req.query.subject, 60);
   const difficulty = cleanText(req.query.difficulty, 30);
   const classLevel = Number.parseInt(req.query.class, 10);
-  if (!subject || !/^[\\p{L}\\p{N} .&'()_+/-]{1,60}$/u.test(subject) ||
-      !difficulty || !/^[\\p{L}\\p{N} ._-]{1,30}$/u.test(difficulty) ||
+  if (!subject || !/^[\p{L}\p{N} .&'()_+-]{1,60}$/u.test(subject) ||
+      !difficulty || !/^[\p{L}\p{N} ._-]{1,30}$/u.test(difficulty) ||
       !Number.isInteger(classLevel) || classLevel < 1 || classLevel > 12) {
     return res.status(400).json({ error: 'Valid subject, difficulty, and class (1–12) are required.' });
   }
@@ -268,8 +268,8 @@ router.post('/battlegrounds-questions/save-practice', requireAuth, saveLimiter, 
   const parsedClassLevel = Number.parseInt(classLevel, 10);
 
   if (!sourceGameId ||
-      !/^[\\p{L}\\p{N} .&'()_+/-]{1,60}$/u.test(cleanSubject) ||
-      !/^[\\p{L}\\p{N} ._-]{1,30}$/u.test(cleanDifficulty) ||
+      !/^[\p{L}\p{N} .&'()_+-]{1,60}$/u.test(cleanSubject) ||
+      !/^[\p{L}\p{N} ._-]{1,30}$/u.test(cleanDifficulty) ||
       !Number.isInteger(parsedClassLevel) || parsedClassLevel < 1 || parsedClassLevel > 12 ||
       !Array.isArray(questions) || questions.length < 1 || questions.length > 10) {
     return res.status(400).json({ error: 'Invalid practice set.' });
