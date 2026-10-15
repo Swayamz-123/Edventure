@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "description": "Replace the example questions and empty labels with your own evaluation cases. Use a dedicated user whose uploaded documents contain the benchmark material.",
+  "cases": [
+    {
+      "id": "answerable-process-definition",
+      "question": "According to my notes, what is a process?",
+      "answerable": true,
+      "documentIds": [],
+      "relevantChunkIds": [],
+      "acceptableCitationChunkIds": [],
+      "citedChunkIds": []
+    },
+    {
+      "id": "unanswerable-external-topic",
+      "question": "What is the capital of a fictional planet called Xylar?",
+      "answerable": false,
+      "documentIds": [],
+      "relevantChunkIds": [],
+      "acceptableCitationChunkIds": [],
+      "citedChunkIds": []
+    }
+  ]
+}
