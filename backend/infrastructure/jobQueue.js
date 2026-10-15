@@ -4,7 +4,7 @@ const { processDocument } = require('../services/documentIngestion');
 
 const QUEUE_NAME = 'edventure:queue:document-ingestion';
 const JOB_TTL_SECONDS = 7 * 24 * 60 * 60;
-const LOCK_TTL_SECONDS = 300;
+const LOCK_TTL_SECONDS = 900;
 const UNLOCK_SCRIPT = `
 if redis.call('GET', KEYS[1]) == ARGV[1] then
   return redis.call('DEL', KEYS[1])
