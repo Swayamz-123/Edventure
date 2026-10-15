@@ -9,6 +9,7 @@ function toPublicUser(user) {
   const value = typeof user.toObject === 'function' ? user.toObject() : user;
   return {
     id: String(value._id ?? value.id ?? ''),
+    _id: String(value._id ?? value.id ?? ''),
     name: value.name ?? '',
     username: value.username ?? '',
     email: value.email ?? '',
