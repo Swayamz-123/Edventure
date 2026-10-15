@@ -13,6 +13,7 @@ const { intervalForAccuracy } = require('../services/learningProjection');
 const { reviewInterval } = require('../routes/learning');
 const { reciprocalRank, recallAtK, ndcgAtK, shouldAbstain, percentile } = require('../scripts/evaluateRag');
 const { recordRequest, renderPrometheus, safeRoute, _resetForTests } = require('../infrastructure/metrics');
+const { escapeRegex } = require('../routes/friends');
 
 test('public user serializer omits credentials and private provider fields', () => {
   const user = toPublicUser({
@@ -169,4 +170,10 @@ test('HTTP metrics normalize IDs and render bounded Prometheus series', () => {
   assert.match(output, /le="0.25"/);
   assert.doesNotMatch(output, /507f1f77bcf86cd799439011/);
   _resetForTests();
+});
+
+test('friend search treats query metacharacters literally', () => {
+  const escaped = escapeRegex('a.*(b)+[$^');
+  assert.equal(new RegExp(escaped).test('aZZZb'), false);
+  assert.equal(new RegExp(escaped).test('a.*(b)+[$^'), true);
 });
