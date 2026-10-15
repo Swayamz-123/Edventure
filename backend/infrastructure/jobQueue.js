@@ -29,17 +29,9 @@ async function enqueueDocument(documentId, { attempt = 0, suffix = null } = {}) 
     QUEUE_NAME,
     `edventure:queue:dedupe:${jobId}`,
     payload,
-    JOB_TTL_SECONDS
+    JOB_TTL_SECONDS,
+    `edventure:job:${jobId}`
   );
-  if (queued) {
-    await redis.command([
-      'SET',
-      `edventure:job:${jobId}`,
-      JSON.stringify({ ...payload, status: 'queued', updatedAt: new Date().toISOString() }),
-      'EX',
-      JOB_TTL_SECONDS
-    ]);
-  }
   return { queued, jobId };
 }
 
