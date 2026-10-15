@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const PointLedger = require('./models/PointLedger');
+const GameMatch = require('./models/GameMatch');
 
 const QUESTION_TIME_LIMIT_MS = 30_000;
 const ANSWER_GRACE_MS = 5_000;
@@ -186,6 +187,37 @@ module.exports = function registerGameHandlers(io, generateQuestions, User) {
       };
       gameRooms.set(gameId, game);
 
+      try {
+        await GameMatch.create({
+          gameId,
+          subject,
+          difficulty,
+          classLevel,
+          mode,
+          status: 'active',
+          players: players.map(player => ({
+            userId: player.userData.userId,
+            username: player.userData.username,
+            score: 0,
+            answers: [],
+            completed: false
+          })),
+          questions: gameQuestions,
+          startedAt: new Date(startedAt),
+          createdAt: new Date(startedAt),
+          updatedAt: new Date(startedAt)
+        });
+      } catch (error) {
+        gameRooms.delete(gameId);
+        console.error('Match persistence failed:', error?.name || 'UnknownError');
+        for (const player of players) {
+          io.to(player.socketId).emit('lobby-error', { message: 'The match could not be started safely. Please retry.' });
+          const waitingSocket = io.sockets.sockets.get(player.socketId);
+          if (waitingSocket) waitingSocket.leave(roomKey);
+        }
+        return;
+      }
+
       for (const player of players) {
         const opponent = players.find(candidate => candidate.socketId !== player.socketId);
         io.to(player.socketId).emit('game-start', {
@@ -200,7 +232,7 @@ module.exports = function registerGameHandlers(io, generateQuestions, User) {
       }
     });
 
-    socket.on('submit-answer', data => {
+    socket.on('submit-answer', async data => {
       const gameId = typeof data?.gameId === 'string' ? data.gameId : '';
       const game = gameRooms.get(gameId);
       const player = game && findPlayer(game, socket.id);
@@ -239,15 +271,46 @@ module.exports = function registerGameHandlers(io, generateQuestions, User) {
       const basePoints = Number.isFinite(Number(question.points)) ? Math.max(0, Math.min(100, Number(question.points))) : 10;
       const earnedPoints = isCorrect ? basePoints + Math.floor(serverTimeLeft / 3) : 0;
 
-      playerAnswers.push({
+      const answerRecord = {
         questionIndex,
         answerIndex,
         timeLeft: serverTimeLeft,
         timeTaken: Math.max(0, Math.ceil(elapsedMs / 1000)),
         isCorrect,
         points: earnedPoints
-      });
+      };
+      // Reserve the answer synchronously so two rapid socket events cannot both
+      // submit the same index while the MongoDB persistence is in flight.
+      playerAnswers.push(answerRecord);
       game.scores[socket.id] += earnedPoints;
+
+      const playerIndex = game.players.findIndex(candidate => candidate.socketId === socket.id);
+      try {
+        const persisted = await GameMatch.updateOne(
+          {
+            gameId: game.id,
+            status: 'active',
+            [`players.${playerIndex}.answers`]: { $size: questionIndex }
+          },
+          {
+            $push: { [`players.${playerIndex}.answers`]: answerRecord },
+            $set: {
+              [`players.${playerIndex}.score`]: game.scores[socket.id],
+              updatedAt: new Date()
+            }
+          }
+        );
+        if (persisted.matchedCount !== 1) {
+          throw new Error('Match state changed before answer persistence.');
+        }
+      } catch (error) {
+        playerAnswers.pop();
+        game.scores[socket.id] = Math.max(0, game.scores[socket.id] - earnedPoints);
+        console.error('Match answer persistence failed:', error?.name || 'UnknownError');
+        socket.emit('answer-rejected', { message: 'Your answer could not be saved. Please retry.' });
+        return;
+      }
+
       if (questionIndex + 1 < game.questions.length) {
         game.questionStartedAt[socket.id][questionIndex + 1] = now;
       }
@@ -280,12 +343,33 @@ module.exports = function registerGameHandlers(io, generateQuestions, User) {
         return;
       }
       if (game.completed[socket.id]) return;
+
+      const playerIndex = game.players.findIndex(candidate => candidate.socketId === socket.id);
+      try {
+        const persisted = await GameMatch.updateOne(
+          {
+            gameId: game.id,
+            status: 'active',
+            [`players.${playerIndex}.answers`]: { $size: game.questions.length }
+          },
+          { $set: { [`players.${playerIndex}.completed`]: true, updatedAt: new Date() } }
+        );
+        if (persisted.matchedCount !== 1) throw new Error('Match completion state did not match the durable record.');
+      } catch (error) {
+        console.error('Match completion persistence failed:', error?.name || 'UnknownError');
+        socket.emit('answer-rejected', { message: 'Your match completion could not be saved. Please retry.' });
+        return;
+      }
       game.completed[socket.id] = true;
 
       if (!Object.values(game.completed).every(Boolean)) return;
       if (game.completionAwarded) return;
-      game.completionAwarded = true;
-      game.status = 'completed';
+
+      const firstScore = game.scores[game.players[0].socketId];
+      const secondScore = game.scores[game.players[1].socketId];
+      const winnerPlayer = firstScore === secondScore
+        ? null
+        : firstScore > secondScore ? game.players[0] : game.players[1];
 
       const finalScores = {
         gameId: game.id,
@@ -298,10 +382,7 @@ module.exports = function registerGameHandlers(io, generateQuestions, User) {
         })),
         player1: playerResult(game, game.players[0]),
         player2: playerResult(game, game.players[1]),
-        winner: game.scores[game.players[0].socketId] > game.scores[game.players[1].socketId]
-          ? game.players[0].userData.username
-          : game.scores[game.players[0].socketId] < game.scores[game.players[1].socketId]
-            ? game.players[1].userData.username : 'tie'
+        winner: winnerPlayer ? winnerPlayer.userData.username : 'tie'
       };
       finalScores.answers = {
         [finalScores.player1.username]: finalScores.player1.answers,
@@ -310,6 +391,37 @@ module.exports = function registerGameHandlers(io, generateQuestions, User) {
         [finalScores.player2.userId]: finalScores.player2.answers
       };
 
+      try {
+        const persisted = await GameMatch.updateOne(
+          { gameId: game.id, status: 'active' },
+          {
+            $set: {
+              status: 'completed',
+              winnerUserId: winnerPlayer ? winnerPlayer.userData.userId : null,
+              completedAt: new Date(),
+              updatedAt: new Date(),
+              'players.0.score': firstScore,
+              'players.0.answers': game.answers[game.players[0].socketId],
+              'players.0.completed': true,
+              'players.1.score': secondScore,
+              'players.1.answers': game.answers[game.players[1].socketId],
+              'players.1.completed': true
+            }
+          }
+        );
+        if (persisted.matchedCount !== 1) throw new Error('Match was not active during completion.');
+      } catch (error) {
+        game.completed[game.players[0].socketId] = false;
+        game.completed[game.players[1].socketId] = false;
+        console.error('Completed match could not be persisted:', error?.name || 'UnknownError');
+        game.players.forEach(candidate => io.to(candidate.socketId).emit('answer-rejected', {
+          message: 'The final result could not be saved. Please retry completion.'
+        }));
+        return;
+      }
+
+      game.completionAwarded = true;
+      game.status = 'completed';
       game.players.forEach(candidate => io.to(candidate.socketId).emit('game-final-results', finalScores));
 
       await Promise.all(game.players.map(candidate =>
@@ -329,6 +441,10 @@ module.exports = function registerGameHandlers(io, generateQuestions, User) {
         const playerIndex = game.players.findIndex(player => player.socketId === socket.id);
         if (playerIndex < 0 || game.status === 'completed') continue;
         game.status = 'abandoned';
+        GameMatch.updateOne(
+          { gameId, status: 'active' },
+          { $set: { status: 'abandoned', updatedAt: new Date() } }
+        ).catch(error => console.error('Could not persist abandoned match:', error?.name || 'UnknownError'));
         const opponent = game.players[1 - playerIndex];
         if (opponent) io.to(opponent.socketId).emit('opponent-disconnected');
         setTimeout(() => gameRooms.delete(gameId), 10_000);
