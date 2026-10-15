@@ -22,14 +22,16 @@ Traditional learning methods are often **boring and passive**, leading to:
 - `POST /auth/logout` - Logout user (POST for AJAX requests)
 - `GET /auth/current_user` - Get current authenticated user
 - `POST /auth/update_profile` - Update user profile
-- `POST /auth/update_points` - Update user points and badges
+- `POST /auth/update_points` - Retired; client-supplied point deltas are rejected
 - `GET /auth/leaderboard` - Get leaderboard data
 - `POST /auth/login` - Login user
-- `POST /auth/unlock-course` - Unlock course with points
+- `POST /auth/unlock-course` - Unlock course using server-owned prices
 - `POST /auth/update-avatar` - Update user avatar
 
 ### Chatbot (`/chatbot`)
-- `POST /chatbot/` - Send message to AI tutor chatbot
+- `POST /chatbot/` - Send a validated, rate-limited message to the AI tutor
+- `POST /api/pdf-quiz` - Generate a PDF quiz through the backend (authenticated)
+- `POST /api/quiz-attempts/:attemptId/submit` - Submit selected answer indexes for server-side scoring
 
 ### Friends (`/friends`)
 - `GET /friends/search` - Search users by username or name
@@ -56,15 +58,16 @@ FRONTEND_URL=http://localhost:5173
 
 ### Frontend (.env)
 ```env
-VITE_GEMINI_API_KEY=your_vite_gemini_api_key
 VITE_BACKEND_URL=http://localhost:5000
 ```
+
+AI provider keys must remain in the backend environment and must never use a `VITE_*` name. If a Gemini key was previously configured as `VITE_GEMINI_API_KEY`, rotate it in the provider console: Vite bundles `VITE_*` variables into public frontend assets.
 
 ## How to Run Locally
 
 1. **Clone and Setup:**
    ```bash
-   git clone https://github.com/Y0Rishav/Edventure.git
+   git clone https://github.com/Swayamz-123/Edventure.git
    cd Edventure
    ```
 
@@ -116,3 +119,15 @@ VITE_BACKEND_URL=http://localhost:5000
 | [Swayamz-123](https://github.com/Swayamz-123)| Member      |
 | [WhiteDemon890](https://github.com/WhiteDemon890) | Member  |
 | [ShubhamPandey121](https://github.com/ShubhamPandey121) | Member |
+
+
+## Security and implementation notes
+
+- API responses use a public-user allow-list; password hashes and provider identifiers are not returned.
+- Login, registration, AI generation, quiz submission, and API routes have request limits and body-size bounds.
+- Quiz attempt ownership, answer checking, and score calculation happen on the backend. The submitted payload contains only option indexes; answer keys are returned only after submission.
+- Multiplayer now uses the authenticated Passport session, validates ordered answers, ignores client-provided time values, withholds answer keys until match completion, and uses an idempotent point ledger.
+- Course prices are defined on the server. The legacy client-supplied point mutation endpoint returns HTTP 410.
+- The included rate limiter is process-local and is a defensive baseline for a single instance, not a distributed limit. A Redis-backed limiter and queue are planned in the next infrastructure phase.
+
+See [docs/SECURITY_AND_ROADMAP.md](docs/SECURITY_AND_ROADMAP.md) for current architecture, local setup, phased delivery, and verification status.
