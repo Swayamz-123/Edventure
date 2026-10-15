@@ -47,3 +47,4 @@ backend/evaluation/rag-results.json
 # Keep private benchmark datasets out of the repository
 backend/evaluation/private/
 backend/evaluation/rag-results-*.json
+backend/evaluation/rag-cases-local.json
