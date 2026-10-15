@@ -17,6 +17,7 @@ import Profile from './components/Profile';
 import Rewards from './components/Rewards';
 import Pdfquiz from './components/Pdfquiz';
 import DocumentTutor from './components/DocumentTutor';
+import LearningDashboard from './components/LearningDashboard';
 
 
 function App() {
@@ -44,6 +45,7 @@ function App() {
 
         <Route path="/pdf-quiz" element={<Pdfquiz />} />
         <Route path="/study" element={<DocumentTutor />} />
+        <Route path="/learning" element={<LearningDashboard />} />
       </Routes>
       <Chatbot />
     </Router>
