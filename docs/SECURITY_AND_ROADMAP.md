@@ -46,7 +46,7 @@ Edventure remains a modular monolith: React/Vite is the learner UI, Express prov
 - The Redis client/queue has parser tests, but has not been tested against hosted Redis fault modes, worker crashes under load, or multi-region deployment. There is no dead-letter dashboard or full distributed tracing.
 - When Redis is not configured, rate limits fall back to process-local memory and are not shared across replicas.
 - If RUN_DOCUMENT_WORKER=false, a worker must run separately using npm run worker; otherwise queued jobs wait until a worker starts.
-- Socket.IO matchmaking and game state remain in a process-local Map. Games do not survive server restart or share state across API instances. Redis sessions are not multiplayer-state persistence; no Socket.IO Redis adapter or resume protocol is wired yet.
+- Accepted answers, scores, and match records are persisted in MongoDB, and an owner-scoped match-history API is available. Live matchmaking/game state remains in a process-local Map, so active matches do not resume after server restart and state is not shared across API instances. Redis sessions are not multiplayer-state persistence; no Socket.IO Redis adapter or resume protocol is wired yet.
 - Solo generated quizzes use server-side fixed scoring without a trusted per-answer speed bonus. Multiplayer's speed bonus uses server-side timestamps.
 - The mastery estimate and review schedule are instructional heuristics, not validated learning-science outcomes.
 - Legacy routes and interactions outside these additions still need a complete security review, cross-user authorization regression tests, dependency auditing, and deployment-specific cookie/CORS tests.
@@ -82,7 +82,7 @@ Never commit .env files. Never use VITE_* for provider keys because Vite embeds 
 Audit every legacy route and socket event for broken object-level authorization, property exposure, unauthorized state changes, and resource exhaustion. Add route integration tests with two distinct users. Verify login/logout, session persistence, concurrent course unlocks, point-ledger idempotency, and upload ownership against a disposable MongoDB.
 
 ### Phase B — Strengthen shared infrastructure
-Choose whether to retain the custom Redis queue or adopt BullMQ. Add worker fault tests, queue-depth/retry/job-duration metrics, and structured request logs. Add a Socket.IO Redis adapter for multi-instance deployment only once tested. Persist match records and game state, then implement reconnect/resume transitions.
+Choose whether to retain the custom Redis queue or adopt BullMQ. Add worker fault tests, queue-depth/retry/job-duration metrics, and structured request logs. Add a Socket.IO Redis adapter for multi-instance deployment only once tested. Make active-match state transitions recoverable and implement reconnect/resume; completed match records and accepted answer history are already persisted.
 
 ### Phase C — RAG quality and ingestion
 Move binary uploads behind a validated multipart endpoint and private object storage. Retain strict limits, parsing isolation, and deletion rules. Add Atlas Vector Search or another scalable index. Build a labelled evaluation set and report Recall@5, MRR/nDCG@5, citation correctness, faithfulness, abstention accuracy, p50/p95 latency, and cost per question. Test cross-user access, document prompt injection, empty/scanned PDFs, malformed/oversized files, and provider failures.
@@ -92,3 +92,10 @@ Use a reviewed topic taxonomy instead of relying only on model-generated topic l
 
 ### Phase E — Portfolio delivery
 Document APIs and invariants, add seeded demo data that contains no credentials, diagrams, threat model, dependency audit reporting, and repeatable load tests. Publish benchmark values only after running them in a named environment; resume bullets must match implemented code and measured results.
+
+
+## RAG evaluation workflow
+
+The live retrieval harness is backend/scripts/evaluateRag.js. Copy backend/evaluation/rag-cases.example.json to a private/custom dataset, upload the relevant benchmark source material to a dedicated evaluation account, and annotate each answerable case with the correct MongoDB chunk IDs in relevantChunkIds. Optionally provide documentIds to restrict retrieval and citedChunkIds plus acceptableCitationChunkIds for human-annotated citation precision. Set RAG_EVAL_USER_ID, RAG_EVAL_DATASET, MONGO_URI and GEMINI_API_KEY, then run npm run evaluate:rag from backend. The report includes Recall@5, MRR, nDCG@5, configured-threshold abstention accuracy and retrieval latency percentiles. Claim-level faithfulness/citation support still require an external human or validated-grader rubric; no quality metric is fabricated by the script.
+
+The optional Prometheus-compatible /metrics endpoint is disabled by default; enable it with METRICS_ENABLED=true and a strong METRICS_TOKEN. It uses a bounded set of process-local HTTP series. For multi-instance operations, connect to a metrics collector and choose appropriate service-level retention and alerting rather than treating these counters as distributed.
