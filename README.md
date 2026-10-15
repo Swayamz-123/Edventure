@@ -1,133 +1,116 @@
-## Problem  
-Traditional learning methods are often **boring and passive**, leading to:  
-- Lack of motivation  
-- Reduced retention ability  
-- No personalized or customizable study environment  
+# Edventure
 
-## Solution – Edventure  
-**Edventure** is a **gamified learning platform** that makes study sessions engaging and adaptive using AI and personalized learning technology.  
+Edventure is a gamified learning platform with live quiz battles, server-verified quiz attempts, a private PDF study library, a document-grounded ERA tutor, and a topic mastery/mistake-review dashboard.
 
-## PPT:
+This fork's current development branch is `feature/edventure-2-security-foundation`. The security, RAG, and adaptive-learning code is under active development; it has CI coverage, but has not yet been load-tested or verified against a production AI provider account.
 
-[​Edventure Project Presentation (PPT)](https://drive.google.com/file/d/1UmR15_VO9X-lXP6B_ktKOH0OprpsT8-y/view?usp=sharing)
+## Implemented features
 
- 
+- **Authentication and API hardening:** public-user DTOs, registration/login validation, rate limits, session cookies, origin restrictions, request-size limits, security headers and health endpoints.
+- **Server-owned gamification:** course prices are enforced by the backend; the client-controlled point mutation route is retired; point-ledger events deduplicate score awards.
+- **Verified quizzes:** owner-scoped attempts; answer keys are omitted from quiz start responses; the server calculates correctness and scores submitted option indexes.
+- **Multiplayer quiz battles:** joins derive identity from the authenticated Passport session; answers must be sequential, timed on the server, and unique; answer keys are hidden until the game ends.
+- **ERA document tutor (RAG baseline):** upload a text-based PDF, retain page-aware chunks/embeddings, retrieve semantically and lexically relevant passages, and answer with source labels and page links. Document access is owner-scoped.
+- **Adaptive learning:** a topic mastery estimate, private mistake notebook, review scheduling, and a dashboard based on server-verified generated-quiz answers.
+- **Shared infrastructure:** Redis-backed fixed-window rate limits and sessions (when configured), an idempotent Redis-list document queue, retry/recovery behavior, a standalone worker command, Docker Compose, and GitHub Actions CI.
 
-## API Endpoints
+## Current limitations
 
-### Authentication (`/auth`)
-- `GET /auth/google` - Initiate Google OAuth login
-- `GET /auth/google/callback` - Google OAuth callback
-- `GET /auth/logout` - Logout user (GET for browser redirects)
-- `POST /auth/logout` - Logout user (POST for AJAX requests)
-- `GET /auth/current_user` - Get current authenticated user
-- `POST /auth/update_profile` - Update user profile
-- `POST /auth/update_points` - Retired; client-supplied point deltas are rejected
-- `GET /auth/leaderboard` - Get leaderboard data
-- `POST /auth/login` - Login user
-- `POST /auth/unlock-course` - Unlock course using server-owned prices
-- `POST /auth/update-avatar` - Update user avatar
+- PDF text is extracted in the browser via PDF.js and posted to the backend; scanned/image-only PDFs, OCR, and server-side file scanning are not included yet.
+- Retrieval uses a bounded MongoDB chunk scan with cosine similarity plus keyword overlap. It is not Atlas Vector Search yet, and no Recall@5/citation-quality results are claimed until the evaluation harness is run against a labelled dataset.
+- The queue is a small Redis-list worker, not BullMQ. Deploying a separate worker requires `RUN_DOCUMENT_WORKER=false` on the API and running `npm run worker` in a worker process.
+- Multiplayer game state is still held in process memory. The server scoring safeguards are implemented, but shared Redis matchmaking, durable match records, socket adapter, and reconnect/resume are follow-up work.
+- Topic mastery uses a simple confidence-adjusted accuracy estimate and accuracy-derived review intervals; it is not a clinical or research-validated learning measure.
+- Real-provider integration and production load tests require your own credentials and infrastructure.
 
-### Chatbot (`/chatbot`)
-- `POST /chatbot/` - Send a validated, rate-limited message to the AI tutor
-- `POST /api/pdf-quiz` - Generate a PDF quiz through the backend (authenticated)
-- `POST /api/quiz-attempts/:attemptId/submit` - Submit selected answer indexes for server-side scoring
+## Architecture
 
-### Friends (`/friends`)
-- `GET /friends/search` - Search users by username or name
-- `GET /friends/` - Get user's friends list
-- `POST /friends/add/:friendId` - Add friend
-- `DELETE /friends/remove/:friendId` - Remove friend
-
-## Environment Variables
-
-### Backend (.env)
-```env
-MONGO_URI=mongodb+srv://username:password@cluster.mongodb.net/database
-PORT=5000
-NODE_ENV=development
-FORCE_HTTPS=true
-GOOGLE_CLIENT_ID=your_google_client_id
-GOOGLE_CLIENT_SECRET=your_google_client_secret
-JWT_SECRET=your_jwt_secret
-GEMINI_API_KEY=your_gemini_api_key
-GEMINI_API_KEY_CHATBOT=your_gemini_chatbot_api_key
-DEEPSEEK_API_KEY_CHATBOT=your_deepseek_api_key
-FRONTEND_URL=http://localhost:5173
+```mermaid
+flowchart LR
+  Learner[Learner browser] --> Web[React + Vite]
+  Web -->|HTTP + session| API[Express API]
+  Web <-->|live events| Socket[Socket.IO gateway]
+  API --> Mongo[(MongoDB)]
+  API --> Redis[(Redis)]
+  API -->|queue jobs| Queue[Redis list queue]
+  Queue --> Worker[Document worker]
+  Worker -->|embeddings| AI[Gemini API]
+  API -->|query embedding + grounded answer| AI
+  Worker --> Chunks[(MongoDB document chunks)]
+  API --> Chunks
 ```
 
-### Frontend (.env)
-```env
-VITE_BACKEND_URL=http://localhost:5000
+The intended starting point is a **modular monolith**, not a premature microservices rewrite. See [the security and roadmap notes](docs/SECURITY_AND_ROADMAP.md).
+
+## Run locally (without Docker)
+
+Requirements: Node.js 20+, MongoDB, and Gemini API credentials for AI quiz generation/RAG.
+
+From the repository root:
+
+```bash
+cp backend/.env.example backend/.env
+# Edit backend/.env: set MONGO_URI, a long random SESSION_SECRET,
+# FRONTEND_URL=http://localhost:5173 and your Gemini key.
+cd backend
+npm ci
+npm run check
+npm test
+npm start
 ```
 
-AI provider keys must remain in the backend environment and must never use a `VITE_*` name. If a Gemini key was previously configured as `VITE_GEMINI_API_KEY`, rotate it in the provider console: Vite bundles `VITE_*` variables into public frontend assets.
+In another terminal, from the repository root:
 
-## How to Run Locally
+```bash
+cd frontend
+cp .env.example .env
+# Ensure VITE_BACKEND_URL=http://localhost:5000
+npm ci
+npm run dev
+```
 
-1. **Clone and Setup:**
-   ```bash
-   git clone https://github.com/Swayamz-123/Edventure.git
-   cd Edventure
-   ```
+Open [http://localhost:5173](http://localhost:5173). The backend API is at [http://localhost:5000](http://localhost:5000); health endpoints are `/health/live` and `/health/ready`.
 
-2. **Backend Setup:**
-   ```bash
-   cd backend
-   npm install
-   # Copy .env and fill in your values
-   npm start
-   ```
+If you use Redis locally, configure `REDIS_URL=redis://localhost:6379` in `backend/.env`. For hosted Upstash-compatible Redis, set `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`. If no Redis configuration is present, local single-process fallbacks are used.
 
-3. **Frontend Setup:**
-   ```bash
-   cd frontend
-   npm install
-   # Copy .env and fill in your values
-   npm run dev
-   ```
+## Run with Docker Compose
 
-4. **Access the Application:**
-   - Frontend: http://localhost:5173
-   - Backend: http://localhost:5000
+Docker Compose provides MongoDB, password-protected Redis, the backend and the production-built frontend.
 
-## Features
+```bash
+cp .env.docker.example .env
+# Generate a strong password, e.g. with: openssl rand -hex 32
+# Put it in the root .env as REDIS_PASSWORD=<generated-value>.
+cp backend/.env.example backend/.env
+# Set SESSION_SECRET and GEMINI_API_KEY in backend/.env.
+docker compose config -q
+docker compose up --build
+```
 
-- **Gamified Learning:** Earn points, unlock badges, Courses and compete on leaderboards
-- **Battlegrounds:** Multiplayer quiz battles with AI-generated questions
-- **Practice Mode:** Solo practice
-- **AI Chatbot:** Personal AI tutor for academic help
-- **Friends System:** Connect with other learners
-- **Profile Management:** Customize avatar, track progress
+Open [http://localhost:4173](http://localhost:4173). API port: `5000`. Stop the containers with `docker compose down`; named volumes preserve MongoDB and Redis data. To delete the data volumes as well, run `docker compose down -v`.
 
-## Technologies Used
+When operating the worker separately, set `RUN_DOCUMENT_WORKER=false` on the API and run `npm run worker` from `backend` in another process/container with the same MongoDB and Redis configuration.
 
-- **Frontend:** React, Vite, Tailwind CSS
-- **Backend:** Node.js, Express.js
-- **Database:** MongoDB
-- **Authentication:** Google OAuth, JWT
-- **AI Integration:** Google Gemini, DeepSeek
-- **Real-time:** Socket.io
-- **Deployment:** Vercel (frontend), Render (backend)
+## Environment and secret handling
 
-## Team Members
+- The frontend requires only `VITE_BACKEND_URL`.
+- Keep Gemini/DeepSeek/API/session/database credentials on the backend. Never add provider keys as `VITE_*` variables because Vite embeds them in public frontend assets.
+- If a provider key was ever configured as `VITE_GEMINI_API_KEY`, rotate it in the provider console before deploying this fork.
+- Set `FRONTEND_URL` and `BACKEND_URL` to the actual hostnames in your deployment. Configure secure cookie settings and proxy trust to match your real reverse-proxy topology.
+- Do not commit `.env`, `backend/.env`, database dumps, or real tokens.
 
-| GitHub ID                                    | Role        |
-|----------------------------------------------|-------------|
-| [Krypton019](https://github.com/Krypton019)  | Team Leader |
-| [Y0Rishav](https://github.com/Y0Rishav)      | Member      |
-| [Swayamz-123](https://github.com/Swayamz-123)| Member      |
-| [WhiteDemon890](https://github.com/WhiteDemon890) | Member  |
-| [ShubhamPandey121](https://github.com/ShubhamPandey121) | Member |
+## Verification
 
+The GitHub Actions workflow runs backend JavaScript syntax checks, unit tests, and the frontend production build. Docker Compose configuration validation is included as a separate CI job. Passing these checks does **not** replace a real-provider integration test, RAG quality evaluation, security review, or concurrent load test.
 
-## Security and implementation notes
+## Main API additions
 
-- API responses use a public-user allow-list; password hashes and provider identifiers are not returned.
-- Login, registration, AI generation, quiz submission, and API routes have request limits and body-size bounds.
-- Quiz attempt ownership, answer checking, and score calculation happen on the backend. The submitted payload contains only option indexes; answer keys are returned only after submission.
-- Multiplayer now uses the authenticated Passport session, validates ordered answers, ignores client-provided time values, withholds answer keys until match completion, and uses an idempotent point ledger.
-- Course prices are defined on the server. The legacy client-supplied point mutation endpoint returns HTTP 410.
-- The included rate limiter is process-local and is a defensive baseline for a single instance, not a distributed limit. A Redis-backed limiter and queue are planned in the next infrastructure phase.
+- `POST /api/pdf-quiz` — authenticated server-side PDF quiz generation.
+- `GET/POST/DELETE /api/documents` — list, index extracted PDF text, and delete the current user's documents.
+- `POST /api/tutor/ask` — retrieve evidence from selected owned documents and return a cited answer.
+- `POST /api/quiz-attempts/:attemptId/submit` — submit selected answer indexes; server calculates score.
+- `GET /api/learning/overview` — topic mastery and revision overview.
+- `GET /api/learning/mistakes` — current user's mistake notebook.
+- `POST /api/learning/mistakes/:mistakeId/review` — schedule a review.
+- `POST /api/learning/mistakes/:mistakeId/resolve` — mark a mistake as learned.
 
-See [docs/SECURITY_AND_ROADMAP.md](docs/SECURITY_AND_ROADMAP.md) for current architecture, local setup, phased delivery, and verification status.
