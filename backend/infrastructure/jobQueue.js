@@ -69,7 +69,7 @@ async function processJob(job) {
 
   try {
     await setJobStatus(job, 'processing', { startedAt: new Date().toISOString() });
-    await processDocument(job.documentId);
+    await processDocument(job.documentId, { lockAlreadyHeld: true });
     const document = await Document.findById(job.documentId).select('status statusMessage chunkCount').lean();
 
     if (document?.status === 'ready') {
