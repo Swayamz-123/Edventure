@@ -6,7 +6,7 @@
     "start": "node index.js",
     "build": "echo 'No build step required'",
     "test": "node --test",
-    "check": "node --check index.js && node --check gameRooms.js && node --check routes/auth.js && node --check routes/chatbot.js && node --check routes/pdfQuiz.js && node --check routes/battlegrounds.js && node --check routes/documents.js && node --check routes/tutor.js && node --check middleware/rateLimit.js && node --check infrastructure/redis.js && node --check infrastructure/jobQueue.js && node --check services/documentIngestion.js && node --check workers/queueWorker.js",
+    "check": "node --check index.js && node --check gameRooms.js && node --check routes/auth.js && node --check routes/chatbot.js && node --check routes/pdfQuiz.js && node --check routes/battlegrounds.js && node --check routes/documents.js && node --check routes/tutor.js && node --check middleware/rateLimit.js && node --check infrastructure/redis.js && node --check infrastructure/jobQueue.js && node --check services/documentIngestion.js && node --check workers/queueWorker.js && node --check infrastructure/redisSessionStore.js",
     "worker": "node workers/queueWorker.js"
   },
   "keywords": [],
