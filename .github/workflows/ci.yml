@@ -26,6 +26,9 @@ jobs:
       - name: Install backend dependencies
         run: npm ci
         working-directory: backend
+      - name: Audit backend dependencies
+        run: npm audit --audit-level=high
+        working-directory: backend
       - name: Check JavaScript syntax
         run: npm run check
         working-directory: backend
@@ -45,6 +48,9 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install frontend dependencies
         run: npm ci
+        working-directory: frontend
+      - name: Audit frontend dependencies
+        run: npm audit --audit-level=high
         working-directory: frontend
       - name: Build production frontend
         run: npm run build
