@@ -13,6 +13,7 @@ const dateLabel = value => {
 function LearningDashboard() {
   const [overview, setOverview] = useState(null);
   const [mistakes, setMistakes] = useState([]);
+  const [matches, setMatches] = useState([]);
   const [mistakeFilter, setMistakeFilter] = useState('open');
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
@@ -21,12 +22,14 @@ function LearningDashboard() {
   const loadData = useCallback(async () => {
     setError('');
     try {
-      const [overviewResponse, mistakeResponse] = await Promise.all([
+      const [overviewResponse, mistakeResponse, matchResponse] = await Promise.all([
         axios.get(`${API}/api/learning/overview`, { withCredentials: true }),
-        axios.get(`${API}/api/learning/mistakes?status=${mistakeFilter}`, { withCredentials: true })
+        axios.get(`${API}/api/learning/mistakes?status=${mistakeFilter}`, { withCredentials: true }),
+        axios.get(`${API}/api/matches/history`, { withCredentials: true })
       ]);
       setOverview(overviewResponse.data);
       setMistakes(mistakeResponse.data.mistakes || []);
+      setMatches(matchResponse.data.matches || []);
     } catch (loadError) {
       if (loadError.response?.status === 401) {
         setError('Please sign in and complete a generated quiz to build your learning history.');
@@ -203,6 +206,37 @@ function LearningDashboard() {
                   )}
                 </section>
               </div>
+
+              <section className="mt-6 rounded-2xl border border-[#2A4A57] bg-[#122E3A] p-5 md:p-6">
+                <div className="mb-4">
+                  <h2 className="text-lg font-bold text-[#9AE9FD]">Recent multiplayer matches</h2>
+                  <p className="mt-1 text-sm text-slate-400">Completed games are saved to your account for later review.</p>
+                </div>
+                {matches.length === 0 ? (
+                  <p className="rounded-xl bg-[#0A1F2B] p-5 text-sm text-slate-400">No saved multiplayer matches yet.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {matches.slice(0, 10).map(match => (
+                      <article key={match.gameId} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#2A4A57] bg-[#0A1F2B]/75 p-4">
+                        <div>
+                          <p className="font-bold text-white">{match.subject} · {match.difficulty}</p>
+                          <p className="mt-1 text-xs text-slate-400">
+                            Class {match.classLevel} · {dateLabel(match.startedAt)}
+                            {match.status === 'completed' ? ` · ${match.answered}/${match.questionCount} answers` : ` · ${match.status}`}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-black text-[#9AE9FD]">{match.score} pts</p>
+                          {match.opponent && <p className="mt-1 text-xs text-slate-400">vs {match.opponent.username} · {match.opponent.score} pts</p>}
+                          <p className={`mt-1 text-xs font-bold ${match.winner === 'you' ? 'text-emerald-300' : match.winner === 'opponent' ? 'text-rose-300' : 'text-slate-400'}`}>
+                            {match.winner === 'you' ? 'Victory' : match.winner === 'opponent' ? 'Defeat' : match.winner === 'tie' ? 'Draw' : 'Result pending'}
+                          </p>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
 
               {weakTopics.length > 0 && (
                 <section className="mt-6 rounded-2xl border border-[#2A4A57] bg-[#122E3A] p-5 md:p-6">
