@@ -1,0 +1,45 @@
+name: One-time dependency lock refresh
+
+on:
+  push:
+    branches:
+      - feature/edventure-2-security-foundation
+
+permissions:
+  contents: write
+
+jobs:
+  refresh-lockfiles:
+    if: contains(github.event.head_commit.message, '[refresh-lockfiles]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/edventure-2-security-foundation
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Refresh compatible backend lockfile versions
+        working-directory: backend
+        run: |
+          npm update --package-lock-only
+          npm audit fix --package-lock-only || true
+          npm audit --audit-level=high || true
+      - name: Refresh compatible frontend lockfile versions
+        working-directory: frontend
+        run: |
+          npm update --package-lock-only
+          npm audit fix --package-lock-only || true
+          npm audit --audit-level=high || true
+      - name: Commit updated lockfiles if changed
+        run: |
+          if git diff --quiet -- backend/package-lock.json frontend/package-lock.json; then
+            echo "No lockfile changes required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/package-lock.json frontend/package-lock.json
+          git commit -m "chore(deps): refresh compatible dependency lockfiles"
+          git push origin HEAD:feature/edventure-2-security-foundation
