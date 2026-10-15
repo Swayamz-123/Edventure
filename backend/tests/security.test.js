@@ -12,6 +12,7 @@ const { parseResp } = require('../infrastructure/redis');
 const { intervalForAccuracy } = require('../services/learningProjection');
 const { reviewInterval } = require('../routes/learning');
 const { reciprocalRank, recallAtK, ndcgAtK, shouldAbstain, percentile } = require('../scripts/evaluateRag');
+const { recordRequest, renderPrometheus, safeRoute, _resetForTests } = require('../infrastructure/metrics');
 
 test('public user serializer omits credentials and private provider fields', () => {
   const user = toPublicUser({
@@ -151,4 +152,21 @@ test('RAG evaluation metrics score relevant evidence and retrieval abstention', 
   assert.equal(shouldAbstain({ semantic: 0.1, lexical: 0.05 }), true);
   assert.equal(shouldAbstain({ semantic: 0.7, lexical: 0.3 }), false);
   assert.equal(percentile([8, 2, 5, 3], 0.5), 3);
+});
+
+test('HTTP metrics normalize IDs and render bounded Prometheus series', () => {
+  _resetForTests();
+  recordRequest({
+    method: 'GET',
+    route: safeRoute({ path: '/api/documents/507f1f77bcf86cd799439011', route: undefined, baseUrl: '' }),
+    status: 200,
+    durationSeconds: 0.12
+  });
+  recordRequest({ method: 'POST', route: '/api/tutor/ask', status: 503, durationSeconds: 1.2 });
+  const output = renderPrometheus();
+  assert.match(output, /route="\\/api\\/documents\\/:id"/);
+  assert.match(output, /edventure_http_requests_total/);
+  assert.match(output, /le="0.25"/);
+  assert.doesNotMatch(output, /507f1f77bcf86cd799439011/);
+  _resetForTests();
 });
