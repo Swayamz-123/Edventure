@@ -118,13 +118,13 @@ test('hybrid retrieval helpers rank semantic and lexical matches', () => {
 });
 
 test('Redis RESP parser handles scalar, bulk-string, and array responses', () => {
-  const scalar = Buffer.from('+OK\\r\\n');
+  const scalar = Buffer.from('+OK\r\n');
   assert.deepEqual(parseResp(scalar, 0), { value: 'OK', next: scalar.length });
 
-  const bulk = Buffer.from('$3\\r\\nfoo\\r\\n');
+  const bulk = Buffer.from('$3\r\nfoo\r\n');
   assert.deepEqual(parseResp(bulk, 0), { value: 'foo', next: bulk.length });
 
-  const array = Buffer.from('*2\\r\\n:2\\r\\n$3\\r\\nbar\\r\\n');
+  const array = Buffer.from('*2\r\n:2\r\n$3\r\nbar\r\n');
   assert.deepEqual(parseResp(array, 0), { value: [2, 'bar'], next: array.length });
-  assert.equal(parseResp(Buffer.from('$5\\r\\nxx'), 0), null);
+  assert.equal(parseResp(Buffer.from('$5\r\nxx'), 0), null);
 });
