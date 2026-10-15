@@ -16,6 +16,7 @@ const gameMatchSchema = new mongoose.Schema({
   mode: { type: String, required: true, maxlength: 30 },
   status: { type: String, enum: ['active', 'completed', 'abandoned'], default: 'active', index: true },
   players: { type: [matchPlayerSchema], required: true, validate: value => value.length === 2 },
+  questionCount: { type: Number, required: true, min: 1, max: 10 },
   // Answer keys remain server-side; the history API deliberately returns a safe summary only.
   questions: { type: [mongoose.Schema.Types.Mixed], required: true, select: false },
   winnerUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
