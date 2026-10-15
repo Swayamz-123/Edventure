@@ -166,16 +166,24 @@ async function incrementWindow(key, windowSeconds) {
   return { count: Number(result[0]), ttl: Number(result[1]) };
 }
 
-async function enqueueOnce(queueName, dedupeKey, payload, ttlSeconds = 604800) {
+async function enqueueOnce(queueName, dedupeKey, payload, ttlSeconds = 604800, stateKey = null) {
   const serialized = JSON.stringify(payload);
+  const state = JSON.stringify({
+    ...payload,
+    status: 'queued',
+    updatedAt: new Date().toISOString()
+  });
   const script = `
 if redis.call('SET', KEYS[1], '1', 'NX', 'EX', ARGV[1]) then
   redis.call('LPUSH', KEYS[2], ARGV[2])
+  if #KEYS >= 3 then redis.call('SET', KEYS[3], ARGV[3], 'EX', ARGV[1]) end
   return 1
 end
 return 0
 `;
-  const result = await command(['EVAL', script, 2, dedupeKey, queueName, ttlSeconds, serialized]);
+  const keys = stateKey ? [dedupeKey, queueName, stateKey] : [dedupeKey, queueName];
+  const argv = stateKey ? [ttlSeconds, serialized, state] : [ttlSeconds, serialized];
+  const result = await command(['EVAL', script, keys.length, ...keys, ...argv]);
   return Number(result) === 1;
 }
 
