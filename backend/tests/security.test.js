@@ -164,7 +164,7 @@ test('HTTP metrics normalize IDs and render bounded Prometheus series', () => {
   });
   recordRequest({ method: 'POST', route: '/api/tutor/ask', status: 503, durationSeconds: 1.2 });
   const output = renderPrometheus();
-  assert.match(output, /route="\\/api\\/documents\\/:id"/);
+  assert.ok(output.includes('route="/api/documents/:id"'));
   assert.match(output, /edventure_http_requests_total/);
   assert.match(output, /le="0.25"/);
   assert.doesNotMatch(output, /507f1f77bcf86cd799439011/);
