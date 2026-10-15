@@ -15,6 +15,8 @@ const pdfQuizRoutes = require('./routes/pdfQuiz');
 const documentsRoutes = require('./routes/documents');
 const tutorRoutes = require('./routes/tutor');
 const { resumePendingDocuments } = require('./services/documentIngestion');
+const redis = require('./infrastructure/redis');
+const { startDocumentQueueWorker } = require('./infrastructure/jobQueue');
 const User = require('./models/User');
 const { generateQuestions } = require('./routes/battlegrounds');
 const { createRateLimiter } = require('./middleware/rateLimit');
@@ -152,10 +154,20 @@ async function start() {
     server.listen(PORT, '0.0.0.0', () => {
       server.off('error', reject);
       console.log(`Edventure API listening on port ${PORT}`);
-      // Resume persisted document-ingestion work left in a processing state by a restart.
-      resumePendingDocuments().catch(error => {
-        console.error('Unable to resume pending document jobs:', error?.name || 'UnknownError');
-      });
+      if (redis.isConfigured()) {
+        if (process.env.RUN_DOCUMENT_WORKER !== 'false') {
+          try {
+            startDocumentQueueWorker();
+          } catch (error) {
+            console.error('Unable to start the Redis document queue worker:', error.message);
+          }
+        }
+      } else {
+        // Without Redis, process durable pending documents in-process after a restart.
+        resumePendingDocuments().catch(error => {
+          console.error('Unable to resume pending document jobs:', error?.name || 'UnknownError');
+        });
+      }
       resolve();
     });
   });
