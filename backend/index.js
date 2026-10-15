@@ -22,6 +22,7 @@ const RedisSessionStore = require('./infrastructure/redisSessionStore');
 const User = require('./models/User');
 const { generateQuestions } = require('./routes/battlegrounds');
 const { createRateLimiter } = require('./middleware/rateLimit');
+const { requestMetricsMiddleware, metricsHandler } = require('./infrastructure/metrics');
 
 const app = express();
 const server = createServer(app);
@@ -85,6 +86,8 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use(requestMetricsMiddleware);
+
 app.use(cors({
   origin(origin, callback) {
     if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
@@ -117,6 +120,7 @@ app.use('/api', apiLimiter);
 
 app.get('/', (_req, res) => res.json({ service: 'Edventure API', status: 'ok' }));
 app.get('/health/live', (_req, res) => res.json({ status: 'ok' }));
+app.get('/metrics', metricsHandler);
 app.get('/health/ready', async (_req, res) => {
   if (mongoose.connection.readyState !== 1) {
     return res.status(503).json({ status: 'not-ready', database: 'disconnected' });
