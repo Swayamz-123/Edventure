@@ -40,9 +40,8 @@ function splitPages(pages) {
 async function embedChunks(chunks) {
   if (!process.env.GEMINI_API_KEY) throw new Error('Embedding provider is not configured.');
   const client = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-  const model = client.getGenerativeModel({
-    model: process.env.GEMINI_EMBEDDING_MODEL || 'gemini-embedding-001'
-  });
+  const embeddingModel = process.env.GEMINI_EMBEDDING_MODEL || 'gemini-embedding-001';
+  const model = client.getGenerativeModel({ model: embeddingModel });
 
   const result = new Array(chunks.length);
   const batchSize = 4;
@@ -57,7 +56,7 @@ async function embedChunks(chunks) {
       result[offset + index] = values;
     });
   }
-  return result;
+  return { vectors: result, modelName: process.env.GEMINI_EMBEDDING_MODEL || 'gemini-embedding-001' };
 }
 
 async function processDocument(documentId, { lockAlreadyHeld = false } = {}) {
@@ -89,14 +88,15 @@ async function processDocument(documentId, { lockAlreadyHeld = false } = {}) {
 
     const chunks = splitPages(pages);
     if (!chunks.length) throw new Error('No extractable text was found in this document.');
-    const embeddings = await embedChunks(chunks);
+    const { vectors: embeddings, modelName: embeddingModel } = await embedChunks(chunks);
     const docs = chunks.map((chunk, index) => ({
       userId: document.userId,
       documentId: document._id,
       chunkIndex: chunk.chunkIndex,
       pageNumber: chunk.pageNumber,
       text: chunk.text,
-      embedding: embeddings[index]
+      embedding: embeddings[index],
+      embeddingModel
     }));
 
     await DocumentChunk.deleteMany({ userId: document.userId, documentId: document._id });
