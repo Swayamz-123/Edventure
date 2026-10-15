@@ -146,12 +146,8 @@ function Rewards() {
   const handleUnlockCourse = async (course) => {
     if (canUnlock(course.pointsRequired) && !isUnlocked(course.id)) {
       try {
-        const newPoints = userPoints - course.pointsRequired;
         const response = await axios.post(`${import.meta.env.VITE_BACKEND_URL}/auth/unlock-course`, 
-          { 
-            newPoints: newPoints,
-            courseId: course.id 
-          }, 
+          { courseId: course.id }, 
           { 
             withCredentials: true,
             headers: { 'Content-Type': 'application/json' }
@@ -159,8 +155,8 @@ function Rewards() {
         );
 
         if (response.status === 200) {
-          setUserPoints(newPoints);
-          setUnlockedCourses(prev => new Set([...prev, course.id]));
+          setUserPoints(Number(response.data.points) || 0);
+          setUnlockedCourses(new Set(response.data.unlockedCourses || [...unlockedCourses, course.id]));
         } else {
           console.error('Failed to unlock course:', response.statusText);
           alert('Failed to unlock course. Please try again.');
