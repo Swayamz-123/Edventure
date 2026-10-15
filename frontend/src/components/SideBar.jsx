@@ -151,6 +151,10 @@ function Sidebar({onLogout}) {
             <BookIcon />
             <span>Study with ERA</span>
           </Link>
+          <Link to="/learning" onClick={closeMobileMenu} className="flex items-center gap-3 px-4 py-3 text-[#002732] hover:bg-[#6BA3B1] rounded-lg transition-colors">
+            <LeaderboardIcon />
+            <span>Learning Insights</span>
+          </Link>
           <Link to="/pdf-quiz" onClick={closeMobileMenu} className="flex items-center gap-3 px-4 py-3 text-[#002732] hover:bg-[#6BA3B1] rounded-lg transition-colors">
             <PdfIcon />
             <span>PDF to Quiz</span>
