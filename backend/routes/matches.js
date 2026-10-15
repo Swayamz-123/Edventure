@@ -46,7 +46,7 @@ router.get('/history', requireAuth, async (req, res) => {
           opponent: opponent ? { username: opponent.username, score: opponent.score || 0 } : null,
           winner,
           answered: own?.answers?.length || 0,
-          questionCount: match.questions?.length || 0
+          questionCount: match.questionCount || 0
         };
       })
     });
