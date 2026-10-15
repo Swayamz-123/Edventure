@@ -12,6 +12,9 @@ const battlegroundsRoutes = require('./routes/battlegrounds');
 const friendsRoutes = require('./routes/friends');
 const chatbotRoutes = require('./routes/chatbot');
 const pdfQuizRoutes = require('./routes/pdfQuiz');
+const documentsRoutes = require('./routes/documents');
+const tutorRoutes = require('./routes/tutor');
+const { resumePendingDocuments } = require('./services/documentIngestion');
 const User = require('./models/User');
 const { generateQuestions } = require('./routes/battlegrounds');
 const { createRateLimiter } = require('./middleware/rateLimit');
@@ -86,7 +89,7 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
-app.use(express.json({ limit: '256kb' }));
+app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: false, limit: '32kb' }));
 app.use(sessionMiddleware);
 app.use(passport.initialize());
@@ -121,6 +124,8 @@ app.use('/api', battlegroundsRoutes);
 app.use('/api/friends', friendsRoutes);
 app.use('/api/chatbot', chatbotRoutes);
 app.use('/api/pdf-quiz', pdfQuizRoutes);
+app.use('/api/documents', documentsRoutes);
+app.use('/api/tutor', tutorRoutes);
 
 const registerGameHandlers = require('./gameRooms');
 registerGameHandlers(io, generateQuestions, User);
@@ -147,6 +152,10 @@ async function start() {
     server.listen(PORT, '0.0.0.0', () => {
       server.off('error', reject);
       console.log(`Edventure API listening on port ${PORT}`);
+      // Resume persisted document-ingestion work left in a processing state by a restart.
+      resumePendingDocuments().catch(error => {
+        console.error('Unable to resume pending document jobs:', error?.name || 'UnknownError');
+      });
       resolve();
     });
   });
