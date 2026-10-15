@@ -101,9 +101,11 @@ router.post('/ask', requireAuth, askLimiter, async (req, res) => {
     }
 
     const queryEmbedding = await embedQuery(question);
+    const embeddingModel = process.env.GEMINI_EMBEDDING_MODEL || 'gemini-embedding-001';
     const chunks = await DocumentChunk.find({
       userId: req.user._id,
-      documentId: { $in: documents.map(document => document._id) }
+      documentId: { $in: documents.map(document => document._id) },
+      embeddingModel
     }).select('+embedding').limit(500).lean();
 
     if (!chunks.length) {
