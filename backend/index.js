@@ -17,6 +17,7 @@ const tutorRoutes = require('./routes/tutor');
 const { resumePendingDocuments } = require('./services/documentIngestion');
 const redis = require('./infrastructure/redis');
 const { startDocumentQueueWorker } = require('./infrastructure/jobQueue');
+const RedisSessionStore = require('./infrastructure/redisSessionStore');
 const User = require('./models/User');
 const { generateQuestions } = require('./routes/battlegrounds');
 const { createRateLimiter } = require('./middleware/rateLimit');
@@ -44,6 +45,7 @@ if (process.env.TRUST_PROXY === 'true') {
 
 const sessionMiddleware = session({
   name: 'connect.sid',
+  store: redis.isConfigured() ? new RedisSessionStore() : undefined,
   secret: sessionSecret,
   resave: false,
   saveUninitialized: false,
