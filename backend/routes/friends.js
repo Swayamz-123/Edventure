@@ -1,74 +1,108 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const User = require('../models/User');
+const { createRateLimiter } = require('../middleware/rateLimit');
 
 const router = express.Router();
+const searchLimiter = createRateLimiter({ windowMs: 60 * 1000, max: 30, keyPrefix: 'friend-search' });
+const mutationLimiter = createRateLimiter({ windowMs: 60 * 1000, max: 10, keyPrefix: 'friend-mutation' });
 
-// Search users by username or name
-router.get('/search', async (req, res) => {
-  if (!req.user) return res.status(401).send('Unauthorized');
-  const { q } = req.query;
-  if (!q) return res.json([]);
+function requireAuth(req, res, next) {
+  if (!req.user?._id) return res.status(401).json({ error: 'Authentication required.' });
+  return next();
+}
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Search accepts a short literal query, never an arbitrary user-supplied regex.
+router.get('/search', requireAuth, searchLimiter, async (req, res) => {
+  const query = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 40) : '';
+  if (query.length < 2) return res.json([]);
 
   try {
+    const literal = escapeRegex(query);
     const users = await User.find({
       $and: [
         {
           $or: [
-            { username: { $regex: q, $options: 'i' } },
-            { name: { $regex: q, $options: 'i' } }
+            { username: { $regex: literal, $options: 'i' } },
+            { name: { $regex: literal, $options: 'i' } }
           ]
         },
-        { _id: { $ne: req.user._id } } // Exclude current user
+        { _id: { $ne: req.user._id } }
       ]
-    }).select('name username _id').limit(10);
-    res.json(users);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    }).select('name username _id').limit(10).lean();
+
+    return res.json(users.map(user => ({
+      id: String(user._id),
+      _id: String(user._id),
+      name: user.name,
+      username: user.username
+    })));
+  } catch (error) {
+    console.error('Friend search failed:', error?.name || 'UnknownError');
+    return res.status(500).json({ error: 'Unable to search for users.' });
   }
 });
 
-// Get friends list
-router.get('/', async (req, res) => {
-  if (!req.user) return res.status(401).send('Unauthorized');
+router.get('/', requireAuth, async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).populate('friends', 'name username _id');
-    res.json(user.friends || []);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    const user = await User.findById(req.user._id).populate('friends', 'name username _id').lean();
+    if (!user) return res.status(404).json({ error: 'User not found.' });
+    return res.json((user.friends || []).map(friend => ({
+      id: String(friend._id),
+      _id: String(friend._id),
+      name: friend.name,
+      username: friend.username
+    })));
+  } catch (error) {
+    console.error('Friend list read failed:', error?.name || 'UnknownError');
+    return res.status(500).json({ error: 'Unable to load friends.' });
   }
 });
 
-// Add friend
-router.post('/add/:friendId', async (req, res) => {
-  if (!req.user) return res.status(401).send('Unauthorized');
+router.post('/add/:friendId', requireAuth, mutationLimiter, async (req, res) => {
   const { friendId } = req.params;
+  if (!mongoose.isValidObjectId(friendId)) return res.status(400).json({ error: 'Invalid user ID.' });
+  if (String(req.user._id) === friendId) return res.status(400).json({ error: 'You cannot add yourself.' });
+
   try {
-    const friend = await User.findById(friendId);
-    if (!friend) return res.status(404).send('User not found');
+    const friend = await User.findById(friendId).select('_id name username').lean();
+    if (!friend) return res.status(404).json({ error: 'User not found.' });
 
-    const user = await User.findById(req.user._id);
-    if (user.friends.includes(friendId)) return res.status(400).send('Already friends');
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { $addToSet: { friends: friend._id } },
+      { new: true, runValidators: true }
+    ).select('_id');
+    if (!user) return res.status(404).json({ error: 'User not found.' });
 
-    user.friends.push(friendId);
-    await user.save();
-
-    res.send('Friend added');
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    return res.status(200).json({
+      message: 'Friend added.',
+      friend: { id: String(friend._id), name: friend.name, username: friend.username }
+    });
+  } catch (error) {
+    console.error('Friend add failed:', error?.name || 'UnknownError');
+    return res.status(500).json({ error: 'Unable to add this friend.' });
   }
 });
 
-// Remove friend
-router.delete('/remove/:friendId', async (req, res) => {
-  if (!req.user) return res.status(401).send('Unauthorized');
+router.delete('/remove/:friendId', requireAuth, mutationLimiter, async (req, res) => {
   const { friendId } = req.params;
+  if (!mongoose.isValidObjectId(friendId)) return res.status(400).json({ error: 'Invalid user ID.' });
+
   try {
-    const user = await User.findById(req.user._id);
-    user.friends = user.friends.filter(id => id.toString() !== friendId);
-    await user.save();
-    res.send('Friend removed');
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    const result = await User.updateOne(
+      { _id: req.user._id },
+      { $pull: { friends: friendId } }
+    );
+    if (result.matchedCount !== 1) return res.status(404).json({ error: 'User not found.' });
+    return res.json({ message: 'Friend removed.' });
+  } catch (error) {
+    console.error('Friend removal failed:', error?.name || 'UnknownError');
+    return res.status(500).json({ error: 'Unable to remove this friend.' });
   }
 });
 
