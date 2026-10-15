@@ -69,6 +69,16 @@ async function processJob(job) {
       return;
     }
 
+    // Another in-process ingestion may already hold the service's active-job
+    // guard. Do not incorrectly mark the document failed while that work runs.
+    // The periodic recovery scan will queue it again if it remains processing.
+    if (document?.status === 'processing') {
+      await setJobStatus(job, 'skipped_inflight', {
+        reason: 'Another ingestion is still processing this document.'
+      });
+      return;
+    }
+
     if (document?.status === 'failed' && job.attempt < 2) {
       await Document.updateOne(
         { _id: job.documentId, status: 'failed' },
