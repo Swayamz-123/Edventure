@@ -87,10 +87,23 @@ router.post('/', requireAuth, ingestionLimiter, async (req, res) => {
       try {
         await enqueueDocument(document._id);
       } catch (queueError) {
-        // Preserve availability if Redis briefly fails after request validation.
-        // The document state is durable and startup recovery can retry it.
+        // Do not attempt inline ingestion when Redis is configured but unavailable:
+        // it cannot acquire the shared lock. The durable "processing" record lets
+        // a worker's recovery scan enqueue it when Redis becomes healthy again.
         console.error('Redis queue unavailable for document:', queueError?.name || 'UnknownError');
-        setImmediate(() => processDocument(document._id));
+        await Document.updateOne(
+          { _id: document._id, userId: req.user._id, status: 'processing' },
+          { $set: {
+            statusMessage: 'Waiting for the shared queue to recover; processing will resume automatically.',
+            updatedAt: new Date()
+          } }
+        );
+        return res.status(202).json({
+          document: {
+            ...publicDocument(document),
+            statusMessage: 'Waiting for the shared queue to recover; processing will resume automatically.'
+          }
+        });
       }
     } else {
       setImmediate(() => {
