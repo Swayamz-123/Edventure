@@ -56,6 +56,7 @@ function validateQuestion(question, index) {
     subject: cleanText(question.subject, 60),
     class: Number(question.class) || undefined,
     difficulty: cleanText(question.difficulty, 30),
+    topic: cleanText(question.topic, 80) || cleanText(question.subject, 60) || 'General',
     question: question.question.trim(),
     options: question.options.map(option => option.trim()),
     correctAnswer: normalizeCorrectAnswer(question),
@@ -85,7 +86,7 @@ async function generateQuestions(subject, difficulty, classLevel) {
     generationConfig: { responseMimeType: 'application/json', temperature: 0.2 }
   });
   const prompt = `Create exactly 5 multiple-choice questions for subject "${subject}" at "${difficulty}" difficulty for class ${classLevel}.
-  Return JSON only in this shape: {"questions":[{"id":"q1","subject":"...","class":${classLevel},"difficulty":"...","question":"...","options":["A","B","C","D"],"correctAnswer":0,"points":10,"timeLimit":30}]}.
+  Return JSON only in this shape: {"questions":[{"id":"q1","subject":"...","class":${classLevel},"difficulty":"...","topic":"one specific topic","question":"...","options":["A","B","C","D"],"correctAnswer":0,"points":10,"timeLimit":30}]}.
   Each question must have four distinct options and correctAnswer must be an integer from 0 to 3. Keep every question appropriate for the selected class level.`;
   const result = await model.generateContent(prompt);
   const parsed = parseJsonResponse(result.response.text());
@@ -155,7 +156,9 @@ router.get('/battlegrounds-questions/filter', requireAuth, questionLimiter, asyn
   const subject = cleanText(req.query.subject, 60);
   const difficulty = cleanText(req.query.difficulty, 30);
   const classLevel = Number.parseInt(req.query.class, 10);
-  if (!subject || !difficulty || !Number.isInteger(classLevel) || classLevel < 1 || classLevel > 12) {
+  if (!subject || !/^[\\p{L}\\p{N} .&'()_+/-]{1,60}$/u.test(subject) ||
+      !difficulty || !/^[\\p{L}\\p{N} ._-]{1,30}$/u.test(difficulty) ||
+      !Number.isInteger(classLevel) || classLevel < 1 || classLevel > 12) {
     return res.status(400).json({ error: 'Valid subject, difficulty, and class (1–12) are required.' });
   }
 
@@ -264,7 +267,9 @@ router.post('/battlegrounds-questions/save-practice', requireAuth, saveLimiter, 
   const cleanDifficulty = cleanText(difficulty, 30);
   const parsedClassLevel = Number.parseInt(classLevel, 10);
 
-  if (!sourceGameId || !cleanSubject || !cleanDifficulty ||
+  if (!sourceGameId ||
+      !/^[\\p{L}\\p{N} .&'()_+/-]{1,60}$/u.test(cleanSubject) ||
+      !/^[\\p{L}\\p{N} ._-]{1,30}$/u.test(cleanDifficulty) ||
       !Number.isInteger(parsedClassLevel) || parsedClassLevel < 1 || parsedClassLevel > 12 ||
       !Array.isArray(questions) || questions.length < 1 || questions.length > 10) {
     return res.status(400).json({ error: 'Invalid practice set.' });
