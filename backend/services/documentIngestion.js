@@ -69,7 +69,7 @@ async function processDocument(documentId, { lockAlreadyHeld = false } = {}) {
 
   try {
     if (redis.isConfigured() && !lockAlreadyHeld) {
-      const result = await redis.command(['SET', lockKey, lockToken, 'NX', 'EX', 300]);
+      const result = await redis.command(['SET', lockKey, lockToken, 'NX', 'EX', 900]);
       if (result !== 'OK') return;
       acquiredLock = true;
     }
