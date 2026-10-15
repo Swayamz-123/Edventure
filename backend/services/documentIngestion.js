@@ -1,0 +1,139 @@
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+const Document = require('../models/Document');
+const DocumentChunk = require('../models/DocumentChunk');
+
+const MAX_CHUNK_CHARS = 1_200;
+const CHUNK_OVERLAP_CHARS = 180;
+const MAX_DOCUMENT_CHARS = 120_000;
+const activeJobs = new Set();
+
+function splitPage(page) {
+  const text = String(page.text || '').replace(/\r\n/g, '\n').trim();
+  if (!text) return [];
+
+  const chunks = [];
+  let start = 0;
+  while (start < text.length) {
+    let end = Math.min(text.length, start + MAX_CHUNK_CHARS);
+    if (end < text.length) {
+      const boundary = Math.max(
+        text.lastIndexOf('\n', end),
+        text.lastIndexOf('. ', end),
+        text.lastIndexOf(' ', end)
+      );
+      if (boundary > start + MAX_CHUNK_CHARS * 0.65) end = boundary + 1;
+    }
+
+    const chunkText = text.slice(start, end).trim();
+    if (chunkText) chunks.push({ pageNumber: page.pageNumber, text: chunkText });
+    if (end >= text.length) break;
+    start = Math.max(start + 1, end - CHUNK_OVERLAP_CHARS);
+  }
+  return chunks;
+}
+
+function splitPages(pages) {
+  return pages.flatMap(splitPage).map((chunk, chunkIndex) => ({ ...chunk, chunkIndex }));
+}
+
+async function embedChunks(chunks) {
+  if (!process.env.GEMINI_API_KEY) throw new Error('Embedding provider is not configured.');
+  const client = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  const model = client.getGenerativeModel({
+    model: process.env.GEMINI_EMBEDDING_MODEL || 'gemini-embedding-001'
+  });
+
+  const result = new Array(chunks.length);
+  const batchSize = 4;
+  for (let offset = 0; offset < chunks.length; offset += batchSize) {
+    const batch = chunks.slice(offset, offset + batchSize);
+    const embeddings = await Promise.all(batch.map(chunk => model.embedContent(chunk.text)));
+    embeddings.forEach((response, index) => {
+      const values = response?.embedding?.values;
+      if (!Array.isArray(values) || values.length < 128 || values.some(value => !Number.isFinite(value))) {
+        throw new Error('Embedding provider returned an invalid vector.');
+      }
+      result[offset + index] = values;
+    });
+  }
+  return result;
+}
+
+async function processDocument(documentId) {
+  const key = String(documentId);
+  if (activeJobs.has(key)) return;
+  activeJobs.add(key);
+
+  try {
+    const document = await Document.findOne({
+      _id: documentId,
+      status: 'processing'
+    }).select('+sourcePages');
+    if (!document || !Array.isArray(document.sourcePages) || !document.sourcePages.length) return;
+
+    const pages = document.sourcePages.map(page => ({
+      pageNumber: page.pageNumber,
+      text: page.text
+    }));
+    const totalCharacters = pages.reduce((sum, page) => sum + page.text.length, 0);
+    if (totalCharacters > MAX_DOCUMENT_CHARS) throw new Error('Document exceeds the ingestion limit.');
+
+    const chunks = splitPages(pages);
+    if (!chunks.length) throw new Error('No extractable text was found in this document.');
+    const embeddings = await embedChunks(chunks);
+    const docs = chunks.map((chunk, index) => ({
+      userId: document.userId,
+      documentId: document._id,
+      chunkIndex: chunk.chunkIndex,
+      pageNumber: chunk.pageNumber,
+      text: chunk.text,
+      embedding: embeddings[index]
+    }));
+
+    await DocumentChunk.deleteMany({ userId: document.userId, documentId: document._id });
+    // Write in bounded batches to keep individual Mongo requests modest.
+    for (let offset = 0; offset < docs.length; offset += 50) {
+      await DocumentChunk.insertMany(docs.slice(offset, offset + 50), { ordered: true });
+    }
+
+    await Document.updateOne(
+      { _id: document._id, userId: document.userId },
+      {
+        $set: {
+          status: 'ready',
+          statusMessage: 'Indexed and ready for questions.',
+          pageCount: pages.length,
+          characterCount: totalCharacters,
+          chunkCount: docs.length,
+          updatedAt: new Date()
+        },
+        $unset: { sourcePages: 1 }
+      }
+    );
+  } catch (error) {
+    console.error('Document ingestion failed:', error?.name || 'UnknownError');
+    await Document.updateOne(
+      { _id: documentId },
+      {
+        $set: {
+          status: 'failed',
+          statusMessage: 'This document could not be indexed. Try a text-based PDF or re-upload it.',
+          updatedAt: new Date()
+        }
+      }
+    );
+  } finally {
+    activeJobs.delete(key);
+  }
+}
+
+async function resumePendingDocuments() {
+  const pending = await Document.find({ status: 'processing' }).select('_id').limit(100).lean();
+  for (const document of pending) {
+    // Bound concurrent embeddings so a restart with many pending documents does
+    // not launch an uncontrolled number of provider requests.
+    await processDocument(document._id);
+  }
+}
+
+module.exports = { splitPage, splitPages, processDocument, resumePendingDocuments };
