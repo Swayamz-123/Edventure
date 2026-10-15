@@ -45,7 +45,10 @@ function validateQuiz(payload) {
   return { questions };
 }
 
-router.post('/', quizLimiter, async (req, res) => {
+router.post('/', (req, res, next) => {
+  if (!req.user?._id) return res.status(401).json({ error: 'Authentication required.' });
+  return next();
+}, quizLimiter, async (req, res) => {
   const sourceText = req.body?.text;
   if (typeof sourceText !== 'string' || sourceText.trim().length < 100 ||
       sourceText.length > MAX_SOURCE_TEXT_CHARS) {
