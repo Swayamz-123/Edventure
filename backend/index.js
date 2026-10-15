@@ -116,11 +116,22 @@ app.use('/api', apiLimiter);
 
 app.get('/', (_req, res) => res.json({ service: 'Edventure API', status: 'ok' }));
 app.get('/health/live', (_req, res) => res.json({ status: 'ok' }));
-app.get('/health/ready', (_req, res) => {
+app.get('/health/ready', async (_req, res) => {
   if (mongoose.connection.readyState !== 1) {
     return res.status(503).json({ status: 'not-ready', database: 'disconnected' });
   }
-  return res.json({ status: 'ready', database: 'connected' });
+
+  let redisStatus = 'not-configured';
+  if (redis.isConfigured()) {
+    try {
+      await redis.command(['PING']);
+      redisStatus = 'connected';
+    } catch (_error) {
+      return res.status(503).json({ status: 'not-ready', database: 'connected', redis: 'disconnected' });
+    }
+  }
+
+  return res.json({ status: 'ready', database: 'connected', redis: redisStatus });
 });
 
 app.use('/auth', authRoutes);
