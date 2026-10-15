@@ -15,6 +15,7 @@ const pdfQuizRoutes = require('./routes/pdfQuiz');
 const documentsRoutes = require('./routes/documents');
 const tutorRoutes = require('./routes/tutor');
 const learningRoutes = require('./routes/learning');
+const matchesRoutes = require('./routes/matches');
 const { resumePendingDocuments } = require('./services/documentIngestion');
 const redis = require('./infrastructure/redis');
 const { startDocumentQueueWorker } = require('./infrastructure/jobQueue');
@@ -147,6 +148,7 @@ app.use('/api/pdf-quiz', pdfQuizRoutes);
 app.use('/api/documents', documentsRoutes);
 app.use('/api/tutor', tutorRoutes);
 app.use('/api/learning', learningRoutes);
+app.use('/api/matches', matchesRoutes);
 
 const registerGameHandlers = require('./gameRooms');
 registerGameHandlers(io, generateQuestions, User);
