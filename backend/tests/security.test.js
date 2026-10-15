@@ -27,7 +27,7 @@ test('public user serializer omits credentials and private provider fields', () 
   assert.equal(Object.hasOwn(user, 'friends'), false);
 });
 
-test('rate limiter rejects requests above the configured limit', () => {
+test('rate limiter rejects requests above the configured limit', async () => {
   const limiter = createRateLimiter({ windowMs: 60_000, max: 2, keyPrefix: 'test' });
   const req = { ip: '198.51.100.12', socket: { remoteAddress: '198.51.100.12' } };
   const createResponse = () => ({
@@ -38,10 +38,10 @@ test('rate limiter rejects requests above the configured limit', () => {
     json(body) { this.body = body; return this; }
   });
   let nextCount = 0;
-  limiter(req, createResponse(), () => { nextCount += 1; });
-  limiter(req, createResponse(), () => { nextCount += 1; });
+  await limiter(req, createResponse(), () => { nextCount += 1; });
+  await limiter(req, createResponse(), () => { nextCount += 1; });
   const rejected = createResponse();
-  limiter(req, rejected, () => { nextCount += 1; });
+  await limiter(req, rejected, () => { nextCount += 1; });
 
   assert.equal(nextCount, 2);
   assert.equal(rejected.statusCode, 429);
